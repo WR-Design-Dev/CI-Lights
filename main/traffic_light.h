@@ -1,8 +1,13 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "app_config.h"
+
+#define TRAFFIC_LIGHT_PROVISION_CODE_LENGTH 8
+#define TRAFFIC_LIGHT_PROVISION_COLOR_COUNT 6
+#define TRAFFIC_LIGHT_PROVISION_SYMBOL_COUNT 18
 
 typedef enum {
     TRAFFIC_LIGHT_OFF,
@@ -16,6 +21,8 @@ void traffic_light_init(void);
 void traffic_light_set(traffic_light_color_t color);
 void traffic_light_set_pulsing(traffic_light_color_t color);
 void traffic_light_start_all_blink_animation(void);
+void traffic_light_start_provision_code_animation(
+    const uint8_t symbols[TRAFFIC_LIGHT_PROVISION_CODE_LENGTH]);
 void traffic_light_start_query_animation(void);
 void traffic_light_start_error_sos_animation(void);
 void traffic_light_stop_query_animation(void);

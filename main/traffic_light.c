@@ -1,5 +1,7 @@
 #include "traffic_light.h"
 
+#include <string.h>
+
 #include "driver/rmt_tx.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -24,6 +26,9 @@
 #define QUERY_BLINK_PAUSE_MS 38
 #define QUERY_SEQUENCE_PAUSE_MS 1000
 #define SOS_DOT_INTERVAL_MS 150
+#define PROVISION_SYMBOL_ON_MS 900
+#define PROVISION_SYMBOL_PAUSE_MS 1500
+#define PROVISION_SEQUENCE_PAUSE_MS 3500
 #define DISCO_FRAME_INTERVAL_MS 85
 
 static const char *TAG = "traffic_light";
@@ -49,6 +54,7 @@ typedef enum {
     TRAFFIC_LIGHT_ANIMATION_ERROR_SOS,
     TRAFFIC_LIGHT_ANIMATION_BUILD_PULSE,
     TRAFFIC_LIGHT_ANIMATION_DISCO,
+    TRAFFIC_LIGHT_ANIMATION_PROVISION_CODE,
 } traffic_light_animation_t;
 
 typedef struct {
@@ -68,6 +74,7 @@ typedef struct {
 } sos_step_t;
 
 static volatile traffic_light_animation_t s_animation;
+static uint8_t s_provision_symbols[TRAFFIC_LIGHT_PROVISION_CODE_LENGTH];
 static TaskHandle_t s_query_animation_task;
 static uint32_t s_disco_random_state = 0x8f4c2a19;
 
@@ -225,6 +232,32 @@ static void set_ws2812_levels_with_brightness(bool red, bool yellow, bool green,
 static void set_ws2812_levels(bool red, bool yellow, bool green)
 {
     set_ws2812_levels_with_brightness(red, yellow, green, ws2812_brightness());
+}
+
+static void render_provision_symbol(uint8_t symbol)
+{
+    static const uint8_t position_leds[] = {
+        TRAFFIC_LIGHT_WS2812_RED_INDEX,
+        TRAFFIC_LIGHT_WS2812_YELLOW_INDEX,
+        TRAFFIC_LIGHT_WS2812_GREEN_INDEX,
+    };
+    static const rgb_color_t colors[TRAFFIC_LIGHT_PROVISION_COLOR_COUNT] = {
+        {255, 0, 0},     /* Red */
+        {255, 80, 0},    /* Orange */
+        {255, 220, 0},   /* Yellow */
+        {0, 255, 0},     /* Green */
+        {0, 0, 255},     /* Blue */
+        {150, 0, 255},   /* Violet */
+    };
+    uint8_t pixels[TRAFFIC_LIGHT_WS2812_LED_COUNT * WS2812_COLOR_BYTES_PER_LED] = {0};
+    const rgb_color_t color = colors[symbol % TRAFFIC_LIGHT_PROVISION_COLOR_COUNT];
+    uint8_t brightness = ws2812_brightness();
+    set_ws2812_pixel(pixels, position_leds[symbol / TRAFFIC_LIGHT_PROVISION_COLOR_COUNT],
+                     (uint8_t) (((uint16_t) color.red * brightness) / 255U),
+                     (uint8_t) (((uint16_t) color.green * brightness) / 255U),
+                     (uint8_t) (((uint16_t) color.blue * brightness) / 255U));
+    set_ws2812_pixels(pixels, sizeof(pixels));
+    set_onboard_rgb_color(0, 0, 0);
 }
 
 static rgb_color_t color_wheel(uint8_t position, uint8_t brightness)
@@ -506,6 +539,8 @@ static void query_animation_task(void *argument)
     uint8_t build_pulse_phase = BUILD_PULSE_HALF_CYCLE_STEPS;
     bool build_pulse_dimming = true;
     uint32_t disco_frame = 0;
+    size_t provision_symbol_index = 0;
+    bool provision_symbol_on = false;
 
     while (s_animation != TRAFFIC_LIGHT_ANIMATION_NONE) {
         traffic_light_animation_t animation = s_animation;
@@ -518,6 +553,8 @@ static void query_animation_task(void *argument)
             build_pulse_phase = BUILD_PULSE_HALF_CYCLE_STEPS;
             build_pulse_dimming = true;
             disco_frame = 0;
+            provision_symbol_index = 0;
+            provision_symbol_on = false;
             previous_animation = animation;
         }
 
@@ -589,6 +626,21 @@ static void query_animation_task(void *argument)
                     ++build_pulse_phase;
                 }
             }
+        } else if (animation == TRAFFIC_LIGHT_ANIMATION_PROVISION_CODE) {
+            if (provision_symbol_on) {
+                set_output_levels(false, false, false);
+                provision_symbol_on = false;
+                bool sequence_finished = provision_symbol_index ==
+                    TRAFFIC_LIGHT_PROVISION_CODE_LENGTH - 1;
+                provision_symbol_index = (provision_symbol_index + 1) %
+                                         TRAFFIC_LIGHT_PROVISION_CODE_LENGTH;
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(sequence_finished ?
+                    PROVISION_SEQUENCE_PAUSE_MS : PROVISION_SYMBOL_PAUSE_MS));
+            } else {
+                render_provision_symbol(s_provision_symbols[provision_symbol_index]);
+                provision_symbol_on = true;
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(PROVISION_SYMBOL_ON_MS));
+            }
         } else if (animation == TRAFFIC_LIGHT_ANIMATION_DISCO) {
             render_disco_frame(disco_frame++);
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(DISCO_FRAME_INTERVAL_MS));
@@ -630,6 +682,22 @@ void traffic_light_start_query_animation(void)
 void traffic_light_start_all_blink_animation(void)
 {
     start_animation(TRAFFIC_LIGHT_ANIMATION_QUERY);
+}
+
+void traffic_light_start_provision_code_animation(
+    const uint8_t symbols[TRAFFIC_LIGHT_PROVISION_CODE_LENGTH])
+{
+    if (symbols == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < TRAFFIC_LIGHT_PROVISION_CODE_LENGTH; ++i) {
+        if (symbols[i] >= TRAFFIC_LIGHT_PROVISION_SYMBOL_COUNT) {
+            ESP_LOGE(TAG, "Ungueltiges Einrichtungs-Codezeichen");
+            return;
+        }
+    }
+    memcpy(s_provision_symbols, symbols, sizeof(s_provision_symbols));
+    start_animation(TRAFFIC_LIGHT_ANIMATION_PROVISION_CODE);
 }
 
 void traffic_light_start_error_sos_animation(void)

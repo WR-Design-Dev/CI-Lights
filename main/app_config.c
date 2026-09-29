@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "bootloader_random.h"
 #include "esp_app_desc.h"
 #include "esp_chip_info.h"
 #include "esp_clk_tree.h"
@@ -23,6 +24,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
+#include "esp_random.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -2433,10 +2435,30 @@ void app_start_status_server(const app_config_t *config,
     ESP_LOGI(TAG, "Ampel-Webseite: http://%s.local", s_light_hostname);
 }
 
+static void generate_provision_password(
+    uint8_t symbols[TRAFFIC_LIGHT_PROVISION_CODE_LENGTH],
+    char password[TRAFFIC_LIGHT_PROVISION_CODE_LENGTH * 2 + 1])
+{
+    static const char position_codes[] = "TMB";
+    static const char color_codes[] = "ROYGBV";
+    /* 252 is the largest multiple of 18 below 256: rejection keeps each
+     * position/color combination equally likely. */
+    bootloader_random_enable();
+    for (size_t i = 0; i < TRAFFIC_LIGHT_PROVISION_CODE_LENGTH; ++i) {
+        uint8_t random_byte;
+        do {
+            esp_fill_random(&random_byte, sizeof(random_byte));
+        } while (random_byte >= 252);
+        symbols[i] = random_byte % TRAFFIC_LIGHT_PROVISION_SYMBOL_COUNT;
+        password[i * 2] = position_codes[symbols[i] / TRAFFIC_LIGHT_PROVISION_COLOR_COUNT];
+        password[i * 2 + 1] = color_codes[symbols[i] % TRAFFIC_LIGHT_PROVISION_COLOR_COUNT];
+    }
+    bootloader_random_disable();
+    password[TRAFFIC_LIGHT_PROVISION_CODE_LENGTH * 2] = '\0';
+}
+
 void app_start_provisioning(void)
 {
-    traffic_light_start_all_blink_animation();
-
     uint8_t mac[6];
     esp_err_t err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
     if (err == ESP_OK) {
@@ -2448,6 +2470,10 @@ void app_start_provisioning(void)
         snprintf(s_provision_ssid, sizeof(s_provision_ssid), "ci-lights-setup");
     }
 
+    uint8_t symbols[TRAFFIC_LIGHT_PROVISION_CODE_LENGTH];
+    char password[TRAFFIC_LIGHT_PROVISION_CODE_LENGTH * 2 + 1];
+    generate_provision_password(symbols, password);
+
     esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
     ESP_ERROR_CHECK(ap_netif == NULL ? ESP_ERR_NO_MEM : ESP_OK);
     wifi_init_config_t wifi_init_config = WIFI_INIT_CONFIG_DEFAULT();
@@ -2456,14 +2482,21 @@ void app_start_provisioning(void)
 
     wifi_config_t ap_config = {0};
     memcpy(ap_config.ap.ssid, s_provision_ssid, strlen(s_provision_ssid));
+    memcpy(ap_config.ap.password, password, sizeof(password));
     ap_config.ap.ssid_len = strlen(s_provision_ssid);
     ap_config.ap.channel = 1;
     ap_config.ap.max_connection = 1;
-    ap_config.ap.authmode = WIFI_AUTH_OPEN;
+    ap_config.ap.authmode = WIFI_AUTH_WPA3_PSK;
+    ap_config.ap.pmf_cfg.required = true;
+    ap_config.ap.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
+    mbedtls_platform_zeroize(password, sizeof(password));
+    mbedtls_platform_zeroize(ap_config.ap.password, sizeof(ap_config.ap.password));
     ESP_ERROR_CHECK(esp_wifi_start());
+    traffic_light_start_provision_code_animation(symbols);
+    mbedtls_platform_zeroize(symbols, sizeof(symbols));
     configure_captive_portal_dhcp(ap_netif);
 
     httpd_config_t server_config = HTTPD_DEFAULT_CONFIG();
@@ -2488,7 +2521,7 @@ void app_start_provisioning(void)
         ESP_LOGI(TAG, "Captive-Portal-DNS ist aktiv");
     }
 
-    ESP_LOGW(TAG, "Einrichtungs-WLAN '%s' ist offen", s_provision_ssid);
-    ESP_LOGW(TAG, "Zugangsdaten werden bei der Einrichtung unverschluesselt uebertragen");
+    ESP_LOGI(TAG, "Einrichtungs-WLAN '%s' verwendet WPA3-SAE", s_provision_ssid);
+    ESP_LOGI(TAG, "LED-Code: 8 Signale, je Position (T/M/B) und Farbe (R/O/Y/G/B/V)");
     ESP_LOGI(TAG, "Captive Portal: %s", s_provision_url);
 }

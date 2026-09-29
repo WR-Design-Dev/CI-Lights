@@ -2,11 +2,21 @@
 
 **Sprachen:** [English](README.md) | Deutsch
 
-> **Experimentelles Projekt - nicht produktionsreif.** Die Server-Zertifikatspruefung fuer WPA2-Enterprise ist zu Testzwecken deaktiviert, das Einrichtungs-WLAN ist offen und die lokale Verwaltung verwendet unverschluesseltes HTTP. Nur in einer vertrauenswuerdigen Testumgebung verwenden.
+> **Experimentelles Projekt - nicht produktionsreif.** Die Server-Zertifikatspruefung fuer WPA2-Enterprise ist zu Testzwecken deaktiviert, die lokale Verwaltung verwendet unverschluesseltes HTTP. Nur in einer vertrauenswuerdigen Testumgebung verwenden.
 
-Beim ersten Start ohne gespeicherte Konfiguration erstellt der ESP das offene
-WLAN `ci-lights-xxxx-setup`. `xxxx` sind die letzten zwei Bytes der
-WLAN-MAC-Adresse, beispielsweise `ci-lights-7a3f-setup`. Nach dem Verbinden
+Beim ersten Start ohne gespeicherte Konfiguration erstellt der ESP das
+WPA3-geschuetzte WLAN `ci-lights-xxxx-setup`. `xxxx` sind die letzten zwei
+Bytes der WLAN-MAC-Adresse, beispielsweise `ci-lights-7a3f-setup`. Das
+WLAN-Passwort wird als acht LED-Signale angezeigt: Pro Signal leuchtet
+genau eine Position (oben `T`, Mitte `M`, unten `B`) in einer Farbe
+(Red `R`, Orange `O`, Yellow `Y`, Green `G`, Blue `B`, Violet `V`).
+Position und Farbe ergeben jeweils zwei Buchstaben, zum Beispiel `TR`
+fuer oben rot und `BV` fuer unten violett. Die acht Paare werden ohne
+Leerzeichen als 16-stelliges WLAN-Passwort eingegeben. Jedes Signal leuchtet 0,9 Sekunden. Zwischen den ersten sieben Signalen
+bleibt die Ampel 1,5 Sekunden schwarz. Nach dem achten folgt eine
+3,5 Sekunden lange schwarze Pause, dann beginnt die Folge erneut. Nach jedem Neustart entsteht ein neuer Code. Das
+Einrichtungs-WLAN erfordert WPA3; ein WPA2-Modus ist nicht vorgesehen.
+Nach dem Verbinden
 sollte das Captive Portal
 automatisch die Einrichtungsseite anzeigen. Falls iOS oder Android sie nicht
 oeffnet, rufe `http://192.168.4.1` manuell auf. Dort werden WLAN-Name,

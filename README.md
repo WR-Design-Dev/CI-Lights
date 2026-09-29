@@ -2,11 +2,21 @@
 
 **Languages:** English | [Deutsch](README.de.md)
 
-> **Experimental project — not production ready.** WPA2-Enterprise server certificate verification is disabled for testing, the setup Wi-Fi network is open, and the local administration interface uses unencrypted HTTP. Use only in a trusted test environment.
+> **Experimental project — not production ready.** WPA2-Enterprise server certificate verification is disabled for testing, and the local administration interface uses unencrypted HTTP. Use only in a trusted test environment.
 
-On first boot without saved configuration, the ESP creates the open Wi-Fi network
-`ci-lights-xxxx-setup`. `xxxx` is the last two bytes of the Wi-Fi MAC address,
-for example `ci-lights-7a3f-setup`. After connecting, the captive portal should
+On first boot without saved configuration, the ESP creates the WPA3-protected
+Wi-Fi network `ci-lights-xxxx-setup`. `xxxx` is the last two bytes of the
+Wi-Fi MAC address, for example `ci-lights-7a3f-setup`. The traffic light
+shows its Wi-Fi password as eight LED signals. Each signal lights one
+position (top `T`, middle `M`, bottom `B`) in one color (Red `R`, Orange
+`O`, Yellow `Y`, Green `G`, Blue `B`, Violet `V`). Position and color
+produce a two-letter pair, such as `TR` for top red or `BV` for bottom
+violet. Enter all eight pairs without spaces as the 16-character Wi-Fi
+password. Each signal lights for 0.9 seconds. The first seven are separated by
+1.5 seconds of darkness; after the eighth, a 3.5-second dark pause marks
+the repeat. A new code is generated
+after every restart. Setup requires WPA3; WPA2 is not offered.
+After connecting, the captive portal should
 open the setup page automatically. If it does not open on iOS or Android, visit
 `http://192.168.4.1` manually. Enter the Wi-Fi name, optional Wi-Fi username,
 and Wi-Fi password there; leave the password blank for an open network. If a
