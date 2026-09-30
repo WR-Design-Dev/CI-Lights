@@ -52,6 +52,7 @@ void app_main(void)
     }
 
     traffic_light_set_brightness(config.light_brightness_percent);
+    traffic_light_set_build_effect(config.build_effect);
 
     bool wifi_connected = false;
     for (uint8_t attempt = 0; attempt < wifi_profiles->count; ++attempt) {

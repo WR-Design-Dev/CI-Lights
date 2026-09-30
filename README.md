@@ -2,7 +2,53 @@
 
 **Languages:** English | [Deutsch](README.de.md)
 
+**Project information:** The code for this project was created by AI.
+
 > **Experimental project — not production ready.** WPA2-Enterprise server certificate verification is disabled for testing, and the local administration interface uses unencrypted HTTP. Use only in a trusted test environment.
+
+## Set up Visual Studio Code and the ESP-IDF extension
+
+1. Install [Visual Studio Code](https://code.visualstudio.com/) and the official
+   [Espressif ESP-IDF extension](https://marketplace.visualstudio.com/items?itemName=espressif.esp-idf-extension).
+   In VS Code, you can also open Extensions with `Ctrl+Shift+X` and search for
+   `ESP-IDF`.
+2. Open the Command Palette with `F1` and run
+   `ESP-IDF: Open ESP-IDF Installation Manager`. Install ESP-IDF **6.1.0** and
+   its tools. Then run `ESP-IDF: Select Current ESP-IDF Version` and select
+   that installation. If the extension detects an existing installation, you
+   can select it directly; otherwise, use the linked manual configuration
+   instructions. `ESP-IDF: Doctor Command` can check the configuration.
+   [Espressif installation guide](https://docs.espressif.com/projects/vscode-esp-idf-extension/en/latest/installation.html)
+3. Clone this repository with Git, or use an existing checkout. In VS Code,
+   use `File > Open Folder` to open the **CI-Lights** directory containing
+   the top-level `CMakeLists.txt`:
+
+   ```sh
+   git clone https://github.com/WR-Design-Dev/CI-Lights.git
+   ```
+
+   This is an existing project, so `ESP-IDF: New Project` is unnecessary. For
+   C/C++ IntelliSense, `ESP-IDF: Add VS Code Configuration Folder` can create
+   a local `.vscode` configuration.
+4. The device target must be `esp32s3`. It is already set in `sdkconfig`; if
+   VS Code shows another target, run `ESP-IDF: Set Espressif Device Target`
+   and select `esp32s3`. Keep the existing configuration: **2 MB flash**, the
+   custom partition table (`partitions.csv`), and **2 MB Quad PSRAM**.
+5. Run `ESP-IDF: Build your Project`. On the first build, the ESP-IDF Component
+   Manager needs internet access to download the cJSON and mDNS dependencies.
+   A successful build creates `build/CI-Lights.bin`.
+6. Connect the ESP32-S3-Zero with a data-capable USB cable in download mode.
+   The board has no USB-to-UART chip: to enter download mode, the
+   [Waveshare documentation](https://docs.waveshare.com/ESP32-S3-Zero) says to
+   hold **BOOT** while connecting USB, or hold **BOOT** and press **RESET**.
+   Then run `ESP-IDF: Select Port to Use` and choose its serial port (for
+   example, `COMx` on Windows). Run `ESP-IDF: Flash your Project` and choose
+   the **UART** flash method. Press **RESET** after flashing to start the firmware.
+   [Espressif flashing guide](https://docs.espressif.com/projects/vscode-esp-idf-extension/en/latest/flashdevice.html)
+7. If the port changes after reset, select it again with
+   `ESP-IDF: Select Port to Use`. Run `ESP-IDF: Monitor Device` to view startup and diagnostic logs.
+   Then follow the Wi-Fi first-time setup described below.
+   [Espressif monitor guide](https://docs.espressif.com/projects/vscode-esp-idf-extension/en/latest/monitoroutput.html)
 
 On first boot without saved configuration, the ESP creates the WPA3-protected
 Wi-Fi network `ci-lights-xxxx-setup`. `xxxx` is the last two bytes of the
@@ -56,22 +102,25 @@ credentials are transmitted across the network without encryption.
 First enter the Jenkins URL, Jenkins username, and Jenkins API token on the
 administration page. A dropdown then shows Jenkins jobs from all folders and
 subfolders. It displays the folder path before each job name to distinguish
-jobs with the same name. The job list is fetched from Jenkins only when the
-small refresh button beside the dropdown is pressed. Once loaded, it is
-stored in the browser and remains available when the page is reopened without
+jobs with the same name. The job list is fetched as soon as the Jenkins
+credentials are saved. The small refresh button beside the dropdown reloads
+it later. Once loaded, it is stored in the browser and remains available when
+the page is reopened without
 making another request. Switching tabs or logging in does not refresh the
-list. After changing the Jenkins credentials, press the button to reload it.
+list. Changing the Jenkins credentials reloads the list automatically.
 
 The selected job is stored persistently and queried immediately. Jenkins
 status `blue` lights green, `yellow` lights yellow, and `red` lights red.
 During a running build (`*_anime`), the corresponding Jenkins status color
-pulses on the LEDs and in the web traffic light. For `grey`, `aborted`, and
+pulses or blinks on the LEDs and in the web traffic light. For `grey`, `aborted`, and
 `notbuilt`, only the middle LED glows dim gray; the top and bottom LEDs stay
 off. `disabled` turns the traffic light completely off (black). Until a job
 is selected, the traffic light is yellow.
 
-The job status is queried immediately at startup and every five minutes by
-default. On the `Configuration` tab, the interval can be set to a whole number
+The job status is queried immediately at startup. If the first query fails
+transiently, two more attempts follow five seconds apart. It is then queried
+every five minutes by default. On the `Configuration` tab, the interval can be
+set to a whole number
 of minutes, with a minimum of one minute. Changes are stored persistently and
 take effect no later than the next one-minute polling check.
 
@@ -178,6 +227,16 @@ once per second.
 
 ## Disco mode and LED brightness
 
+On the `Controls` tab, choose `Pulse` or `Blink (on/off)` for running Jenkins
+builds. This choice is stored persistently and survives restarts. `Pulse` is
+the default. The effect can also be set through the REST API:
+
+```sh
+curl -u USERNAME -X POST http://ci-lights-ID.local/api/build-effect \
+  -H "Content-Type: application/json" \
+  -d '{"effect":"blink"}'
+```
+
 The brightness control is on the `Controls` tab and applies to the external
 WS2812 traffic light, the built-in RGB LED, and all control modes. It can be
 set from 1 to 100 percent and is stored persistently. Without a saved value,
@@ -228,7 +287,8 @@ The `network` tag reports Wi-Fi disconnections with reason and RSSI as well
 as reconnection. `lights_http` reports accepted and closed connections,
 HTTP parser errors, and the durations of `GET /`, `GET /api/jobs`, and
 `POST /api/mode`. The three POST requests for manual LED control are also
-logged. `GET /api/jobs` is triggered only by the job list refresh button.
+logged. `GET /api/jobs` is triggered when Jenkins credentials are saved and
+by the job list refresh button.
 
 If `lights_http` reports an accepted connection but no following `GET /`
 or API request, the HTTP error code helps identify the problem. Long
@@ -333,10 +393,11 @@ There are intentionally no OTA updates. The only firmware partition is
 1.75 MiB of the 2 MiB flash and is flashed over USB. The final 128 KiB
 is reserved for uploaded branding.
 
-The setup Wi-Fi network is intentionally open. Wi-Fi credentials are
-therefore transmitted without encryption during setup and can be read or
-changed by anyone within radio range. Jenkins credentials are entered later
-on the administration page over the local Wi-Fi network.
+The setup Wi-Fi network uses WPA3-SAE and a new LED-displayed code after every
+restart. The captive portal still uses HTTP; someone with access to the setup
+network can intercept or change the entered Wi-Fi credentials through an
+active attack. Jenkins credentials are entered later on the administration
+page over the local Wi-Fi network.
 
 If Jenkins uses an internal CA, its root certificate must also be added
 to the ESP-IDF certificate bundle. TLS verification must not be disabled.

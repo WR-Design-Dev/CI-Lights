@@ -22,6 +22,7 @@
 #define BUILD_PULSE_INTERVAL_MS 80
 #define BUILD_PULSE_HALF_CYCLE_STEPS 12
 #define BUILD_PULSE_MINIMUM_PERCENT 10
+#define BUILD_BLINK_INTERVAL_MS 500
 #define QUERY_BLINK_INTERVAL_MS 75
 #define QUERY_BLINK_PAUSE_MS 38
 #define QUERY_SEQUENCE_PAUSE_MS 1000
@@ -38,6 +39,7 @@ static bool s_green_light_enabled;
 static bool s_grey_light_enabled;
 static app_control_mode_t s_control_mode;
 static app_disco_effect_t s_disco_effect;
+static app_build_effect_t s_build_effect;
 static uint8_t s_brightness_percent;
 static rmt_channel_handle_t s_ws2812_channel;
 static rmt_encoder_handle_t s_ws2812_encoder;
@@ -53,6 +55,7 @@ typedef enum {
     TRAFFIC_LIGHT_ANIMATION_QUERY,
     TRAFFIC_LIGHT_ANIMATION_ERROR_SOS,
     TRAFFIC_LIGHT_ANIMATION_BUILD_PULSE,
+    TRAFFIC_LIGHT_ANIMATION_BUILD_BLINK,
     TRAFFIC_LIGHT_ANIMATION_DISCO,
     TRAFFIC_LIGHT_ANIMATION_PROVISION_CODE,
 } traffic_light_animation_t;
@@ -512,7 +515,7 @@ void traffic_light_set(traffic_light_color_t color)
     render_stored_status();
 }
 
-void traffic_light_set_pulsing(traffic_light_color_t color)
+void traffic_light_set_build_running(traffic_light_color_t color)
 {
     if (s_control_mode != APP_CONTROL_MODE_AUTO) {
         ESP_LOGI(TAG, "Jenkins-Status wird durch die gewaehlte Betriebsart ignoriert");
@@ -524,7 +527,9 @@ void traffic_light_set_pulsing(traffic_light_color_t color)
     s_green_light_enabled = color == TRAFFIC_LIGHT_GREEN;
     s_grey_light_enabled = false;
     traffic_light_stop_query_animation();
-    start_animation(TRAFFIC_LIGHT_ANIMATION_BUILD_PULSE);
+    start_animation(s_build_effect == APP_BUILD_EFFECT_BLINK ?
+                    TRAFFIC_LIGHT_ANIMATION_BUILD_BLINK :
+                    TRAFFIC_LIGHT_ANIMATION_BUILD_PULSE);
 }
 
 static void query_animation_task(void *argument)
@@ -538,6 +543,7 @@ static void query_animation_task(void *argument)
     bool startup_dimming = true;
     uint8_t build_pulse_phase = BUILD_PULSE_HALF_CYCLE_STEPS;
     bool build_pulse_dimming = true;
+    bool build_blink_on = true;
     uint32_t disco_frame = 0;
     size_t provision_symbol_index = 0;
     bool provision_symbol_on = false;
@@ -552,6 +558,7 @@ static void query_animation_task(void *argument)
             startup_dimming = true;
             build_pulse_phase = BUILD_PULSE_HALF_CYCLE_STEPS;
             build_pulse_dimming = true;
+            build_blink_on = true;
             disco_frame = 0;
             provision_symbol_index = 0;
             provision_symbol_on = false;
@@ -626,6 +633,12 @@ static void query_animation_task(void *argument)
                     ++build_pulse_phase;
                 }
             }
+        } else if (animation == TRAFFIC_LIGHT_ANIMATION_BUILD_BLINK) {
+            set_output_levels(build_blink_on && s_red_light_enabled,
+                              build_blink_on && s_yellow_light_enabled,
+                              build_blink_on && s_green_light_enabled);
+            build_blink_on = !build_blink_on;
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(BUILD_BLINK_INTERVAL_MS));
         } else if (animation == TRAFFIC_LIGHT_ANIMATION_PROVISION_CODE) {
             if (provision_symbol_on) {
                 set_output_levels(false, false, false);
@@ -727,6 +740,12 @@ bool traffic_light_is_pulsing(void)
 {
     return s_control_mode == APP_CONTROL_MODE_AUTO &&
            s_animation == TRAFFIC_LIGHT_ANIMATION_BUILD_PULSE;
+}
+
+bool traffic_light_is_blinking(void)
+{
+    return s_control_mode == APP_CONTROL_MODE_AUTO &&
+           s_animation == TRAFFIC_LIGHT_ANIMATION_BUILD_BLINK;
 }
 
 bool traffic_light_is_grey(void)
@@ -881,6 +900,21 @@ uint8_t traffic_light_brightness(void)
     return s_brightness_percent;
 }
 
+void traffic_light_set_build_effect(app_build_effect_t effect)
+{
+    if (effect >= APP_BUILD_EFFECT_COUNT) {
+        return;
+    }
+    s_build_effect = effect;
+    if (s_control_mode == APP_CONTROL_MODE_AUTO &&
+        (s_animation == TRAFFIC_LIGHT_ANIMATION_BUILD_PULSE ||
+         s_animation == TRAFFIC_LIGHT_ANIMATION_BUILD_BLINK)) {
+        start_animation(effect == APP_BUILD_EFFECT_BLINK ?
+                        TRAFFIC_LIGHT_ANIMATION_BUILD_BLINK :
+                        TRAFFIC_LIGHT_ANIMATION_BUILD_PULSE);
+    }
+}
+
 void traffic_light_init(void)
 {
     s_ws2812_available = init_ws2812(&s_ws2812_channel, &s_ws2812_encoder, &s_ws2812_mutex,
@@ -890,6 +924,7 @@ void traffic_light_init(void)
                                            "Eingebaute RGB-LED");
     s_control_mode = APP_CONTROL_MODE_AUTO;
     s_disco_effect = APP_DISCO_EFFECT_RAINBOW;
+    s_build_effect = APP_BUILD_EFFECT_PULSE;
     s_brightness_percent = APP_LIGHT_BRIGHTNESS_DEFAULT_PERCENT;
     s_manual_red_color = (rgb_color_t) {.red = 255, .green = 0, .blue = 0};
     s_manual_yellow_color = (rgb_color_t) {.red = 255, .green = 255, .blue = 0};

@@ -13,6 +13,12 @@
 #define APP_JENKINS_POLL_INTERVAL_DEFAULT_MINUTES 5
 #define APP_LIGHT_BRIGHTNESS_DEFAULT_PERCENT 50
 
+typedef enum {
+    APP_BUILD_EFFECT_PULSE,
+    APP_BUILD_EFFECT_BLINK,
+    APP_BUILD_EFFECT_COUNT,
+} app_build_effect_t;
+
 typedef struct {
     char wifi_ssid[APP_WIFI_SSID_MAX_LENGTH + 1];
     char wifi_username[APP_WIFI_USERNAME_MAX_LENGTH + 1];
@@ -23,6 +29,7 @@ typedef struct {
     char jenkins_token[APP_JENKINS_TOKEN_MAX_LENGTH + 1];
     uint32_t jenkins_poll_interval_minutes;
     uint8_t light_brightness_percent;
+    app_build_effect_t build_effect;
 } app_config_t;
 
 typedef void (*app_job_selected_handler_t)(const app_config_t *config);

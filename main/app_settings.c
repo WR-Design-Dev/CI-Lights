@@ -20,6 +20,7 @@
 #define NVS_KEY_JENKINS_TOKEN "jenkins_token"
 #define NVS_KEY_JENKINS_POLL_INTERVAL "jenkins_poll"
 #define NVS_KEY_LIGHT_BRIGHTNESS "brightness"
+#define NVS_KEY_BUILD_EFFECT "build_effect"
 #define NVS_KEY_UI_LANGUAGE "ui_language"
 #define NVS_KEY_SITE_TITLE "site_title"
 #define NVS_KEY_WIFI_COUNT "wifi_count"
@@ -412,6 +413,7 @@ bool app_config_load(app_config_t *config)
     memset(config, 0, sizeof(*config));
     config->jenkins_poll_interval_minutes = APP_JENKINS_POLL_INTERVAL_DEFAULT_MINUTES;
     config->light_brightness_percent = APP_LIGHT_BRIGHTNESS_DEFAULT_PERCENT;
+    config->build_effect = APP_BUILD_EFFECT_PULSE;
 
     nvs_handle_t nvs_handle;
     if (nvs_open(SETTINGS_NAMESPACE, NVS_READONLY, &nvs_handle) != ESP_OK) {
@@ -477,6 +479,11 @@ bool app_config_load(app_config_t *config)
                                           &brightness_percent);
     if (brightness_err == ESP_OK && brightness_percent >= 1 && brightness_percent <= 100) {
         config->light_brightness_percent = brightness_percent;
+    }
+    uint8_t build_effect = APP_BUILD_EFFECT_PULSE;
+    if (nvs_get_u8(nvs_handle, NVS_KEY_BUILD_EFFECT, &build_effect) == ESP_OK &&
+        build_effect < APP_BUILD_EFFECT_COUNT) {
+        config->build_effect = (app_build_effect_t) build_effect;
     }
     nvs_close(nvs_handle);
 
@@ -741,6 +748,25 @@ esp_err_t app_config_save_light_brightness(uint8_t percent)
         err = nvs_commit(nvs_handle);
     }
 
+    nvs_close(nvs_handle);
+    return err;
+}
+
+esp_err_t app_config_save_build_effect(app_build_effect_t effect)
+{
+    if (effect >= APP_BUILD_EFFECT_COUNT) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(SETTINGS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_set_u8(nvs_handle, NVS_KEY_BUILD_EFFECT, (uint8_t) effect);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs_handle);
+    }
     nvs_close(nvs_handle);
     return err;
 }

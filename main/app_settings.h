@@ -41,6 +41,7 @@ esp_err_t app_wifi_profiles_remove(const char *ssid);
 esp_err_t app_config_save_jenkins(const app_config_t *config);
 esp_err_t app_config_save_jenkins_poll_interval(uint32_t poll_interval_minutes);
 esp_err_t app_config_save_light_brightness(uint8_t percent);
+esp_err_t app_config_save_build_effect(app_build_effect_t effect);
 const char *app_config_get_language(void);
 esp_err_t app_config_save_language(const char *language);
 const char *app_config_get_site_title(void);

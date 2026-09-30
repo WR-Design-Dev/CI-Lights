@@ -19,7 +19,7 @@ typedef enum {
 
 void traffic_light_init(void);
 void traffic_light_set(traffic_light_color_t color);
-void traffic_light_set_pulsing(traffic_light_color_t color);
+void traffic_light_set_build_running(traffic_light_color_t color);
 void traffic_light_start_all_blink_animation(void);
 void traffic_light_start_provision_code_animation(
     const uint8_t symbols[TRAFFIC_LIGHT_PROVISION_CODE_LENGTH]);
@@ -29,7 +29,9 @@ void traffic_light_stop_query_animation(void);
 void traffic_light_set_control_mode(app_control_mode_t mode);
 app_control_mode_t traffic_light_control_mode(void);
 bool traffic_light_is_pulsing(void);
+bool traffic_light_is_blinking(void);
 bool traffic_light_is_grey(void);
+void traffic_light_set_build_effect(app_build_effect_t effect);
 void traffic_light_set_manual(app_manual_light_t light, bool enabled);
 bool traffic_light_manual_state(app_manual_light_t light);
 void traffic_light_set_manual_color(app_manual_light_t light, uint8_t red, uint8_t green,

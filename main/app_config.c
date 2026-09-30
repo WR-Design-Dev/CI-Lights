@@ -42,6 +42,7 @@
 #define JENKINS_JOB_LIST_MAX_LENGTH 16384
 #define JENKINS_JOB_LIST_URL_MAX_LENGTH 512
 #define JENKINS_JOB_PAGE_SIZE 20
+#define JENKINS_JOB_RETRY_DELAY_MS 1000
 #define STATUS_HTTP_TASK_STACK_SIZE 20480
 #define CAPTIVE_DNS_PORT 53
 #define CAPTIVE_DNS_PACKET_MAX_LENGTH 512
@@ -978,8 +979,10 @@ static bool jenkins_job_url_is_valid(const char *url)
            strpbrk(url + base_length, "?#") == NULL;
 }
 
-static cJSON *fetch_jenkins_job_level(const char *parent_url, size_t first_job)
+static cJSON *fetch_jenkins_job_level_once(const char *parent_url, size_t first_job,
+                                           bool *retryable)
 {
+    *retryable = false;
     char request_url[JENKINS_JOB_LIST_URL_MAX_LENGTH];
     size_t parent_length = strlen(parent_url);
     int url_length = snprintf(request_url, sizeof(request_url),
@@ -1021,6 +1024,9 @@ static cJSON *fetch_jenkins_job_level(const char *parent_url, size_t first_job)
     if (err != ESP_OK || status_code < 200 || status_code >= 300 || response.body == NULL) {
         ESP_LOGE(TAG, "Jobliste konnte nicht geladen werden: %s (HTTP %d)",
                  esp_err_to_name(err), status_code);
+        *retryable = (err != ESP_OK && err != ESP_ERR_NO_MEM) ||
+                     status_code == 429 || status_code >= 500 ||
+                     (err == ESP_OK && status_code >= 200 && status_code < 300);
         free(response.body);
         return NULL;
     }
@@ -1034,6 +1040,20 @@ static cJSON *fetch_jenkins_job_level(const char *parent_url, size_t first_job)
         return NULL;
     }
     return jenkins_json;
+}
+
+static cJSON *fetch_jenkins_job_level(const char *parent_url, size_t first_job)
+{
+    bool retryable = false;
+    cJSON *jenkins_json = fetch_jenkins_job_level_once(parent_url, first_job, &retryable);
+    if (jenkins_json != NULL || !retryable) {
+        return jenkins_json;
+    }
+
+    ESP_LOGW(TAG, "Jenkins-Jobliste: erneuter Versuch in %u ms",
+             JENKINS_JOB_RETRY_DELAY_MS);
+    vTaskDelay(pdMS_TO_TICKS(JENKINS_JOB_RETRY_DELAY_MS));
+    return fetch_jenkins_job_level_once(parent_url, first_job, &retryable);
 }
 
 static bool jenkins_item_is_folder(const cJSON *job)
@@ -1428,6 +1448,23 @@ static bool control_mode_from_name(const char *name, app_control_mode_t *mode)
     return true;
 }
 
+static const char *build_effect_name(app_build_effect_t effect)
+{
+    return effect == APP_BUILD_EFFECT_BLINK ? "blink" : "pulse";
+}
+
+static bool build_effect_from_name(const char *name, app_build_effect_t *effect)
+{
+    if (strcmp(name, "pulse") == 0) {
+        *effect = APP_BUILD_EFFECT_PULSE;
+    } else if (strcmp(name, "blink") == 0) {
+        *effect = APP_BUILD_EFFECT_BLINK;
+    } else {
+        return false;
+    }
+    return true;
+}
+
 static const char *disco_effect_name(app_disco_effect_t effect)
 {
     switch (effect) {
@@ -1655,10 +1692,11 @@ static esp_err_t status_manual_lights_state_handler(httpd_req_t *request)
                                &yellow_blue);
     traffic_light_manual_color(APP_MANUAL_LIGHT_GREEN, &green_red, &green_green,
                                &green_blue);
-    char response[384];
+    char response[448];
     int response_length = snprintf(response, sizeof(response),
                                    "{\"red\":%s,\"yellow\":%s,\"green\":%s,\"mode\":\"%s\","
-                                   "\"pulsing\":%s,\"grey\":%s,"
+                                   "\"pulsing\":%s,\"blinking\":%s,\"grey\":%s,"
+                                   "\"build_effect\":\"%s\","
                                    "\"disco_effect\":\"%s\",\"brightness\":%u,"
                                    "\"red_color\":\"#%02x%02x%02x\","
                                    "\"yellow_color\":\"#%02x%02x%02x\","
@@ -1668,7 +1706,9 @@ static esp_err_t status_manual_lights_state_handler(httpd_req_t *request)
                                    s_manual_light_state_handler(APP_MANUAL_LIGHT_GREEN) ? "true" : "false",
                                    control_mode_name(mode),
                                    traffic_light_is_pulsing() ? "true" : "false",
+                                   traffic_light_is_blinking() ? "true" : "false",
                                    traffic_light_is_grey() ? "true" : "false",
+                                   build_effect_name(s_status_config.build_effect),
                                    disco_effect, (unsigned) brightness,
                                    (unsigned) red_red, (unsigned) red_green, (unsigned) red_blue,
                                    (unsigned) yellow_red, (unsigned) yellow_green,
@@ -1730,6 +1770,53 @@ static esp_err_t status_disco_effect_handler(httpd_req_t *request)
     s_disco_effect_handler(effect);
     httpd_resp_set_type(request, "text/plain; charset=utf-8");
     return httpd_resp_sendstr(request, "Disco-Animation aktiviert.");
+}
+
+static esp_err_t status_build_effect_handler(httpd_req_t *request)
+{
+    if (request->content_len == 0 || request->content_len >= STATUS_REQUEST_MAX_LENGTH) {
+        return send_status_error(request, "400 Bad Request", "Ungueltiger Build-Effekt.");
+    }
+
+    char request_body[STATUS_REQUEST_MAX_LENGTH];
+    int received = 0;
+    while (received < request->content_len) {
+        int result = httpd_req_recv(request, request_body + received,
+                                    request->content_len - received);
+        if (result == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if (result <= 0) {
+            return send_status_error(request, "400 Bad Request",
+                                     "Build-Effekt konnte nicht gelesen werden.");
+        }
+        received += result;
+    }
+    request_body[received] = '\0';
+
+    cJSON *json = cJSON_Parse(request_body);
+    cJSON *effect_name = json == NULL ? NULL : cJSON_GetObjectItemCaseSensitive(json, "effect");
+    app_build_effect_t effect;
+    if (!cJSON_IsString(effect_name) || effect_name->valuestring == NULL ||
+        !build_effect_from_name(effect_name->valuestring, &effect)) {
+        if (json != NULL) {
+            cJSON_Delete(json);
+        }
+        return send_status_error(request, "400 Bad Request", "Unbekannter Build-Effekt.");
+    }
+    cJSON_Delete(json);
+
+    esp_err_t err = app_config_save_build_effect(effect);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Build-Effekt konnte nicht gespeichert werden: %s", esp_err_to_name(err));
+        return send_status_error(request, "500 Internal Server Error",
+                                 "Build-Effekt konnte nicht gespeichert werden.");
+    }
+
+    s_status_config.build_effect = effect;
+    traffic_light_set_build_effect(effect);
+    httpd_resp_set_type(request, "text/plain; charset=utf-8");
+    return httpd_resp_sendstr(request, "Build-Effekt gespeichert.");
 }
 
 static esp_err_t status_brightness_handler(httpd_req_t *request)
@@ -2064,7 +2151,7 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "<section class=\"branding-settings\"><h2>Branding</h2><p class=\"hint\">Das Banner oben kannst du direkt anklicken und hochladen. Das Favicon wird hier hochgeladen. Beide Dateien bleiben nach einem Neustart im Flash gespeichert.</p><form class=\"branding-item\" data-branding=\"favicon\"><label>Favicon (ICO oder PNG, maximal 32 KiB)<input type=\"file\" accept=\".ico,image/x-icon,image/vnd.microsoft.icon,.png,image/png\" required></label><p class=\"hint\" data-branding-state=\"favicon\" role=\"status\">Noch nicht hochgeladen</p><button type=\"submit\">Favicon hochladen</button></form></section></section>"
         "<section id=\"tab-manual\" class=\"tab\" role=\"tabpanel\"><h2>Ampelsteuerung</h2>"
         "<p class=\"hint\">Wähle, wer die Ampel steuert. Manuell und API setzen Jenkins vollständig aus.</p>"
-        "<section class=\"brightness-control\" aria-label=\"LED-Helligkeit\"><label class=\"brightness-label\" for=\"brightness\">LED-Helligkeit</label><div class=\"brightness-row\"><input id=\"brightness\" type=\"range\" min=\"1\" max=\"100\" step=\"1\" value=\"50\"><output id=\"brightness-value\" for=\"brightness\">50 %</output></div></section><label>Betriebsart<select id=\"control-mode\"><option value=\"auto\">Auto (Jenkins)</option><option value=\"manual\">Manuell</option><option value=\"disco\">Disco</option><option value=\"api\">REST API</option></select></label><p id=\"mode-hint\" class=\"hint\"></p><section id=\"disco-controls\" class=\"disco-controls\" hidden><label for=\"disco-effect\">Disco-Animation<select id=\"disco-effect\" disabled><option value=\"rainbow\">Rainbow</option><option value=\"colorloop\">Colorloop</option><option value=\"chase\">Chase</option><option value=\"rainbow-chase\">Rainbow Chase</option><option value=\"blink\">Blink</option><option value=\"breathe\">Breathe</option><option value=\"twinkle\">Twinkle</option><option value=\"scan\">Scan</option><option value=\"theater-chase\">Theater Chase</option><option value=\"fireworks\">Fireworks</option></select></label><p class=\"hint\">Zehn kompakte Effekte, angelehnt an WLED.</p></section><div class=\"manual-controls\">"
+        "<section class=\"brightness-control\" aria-label=\"LED-Helligkeit\"><label class=\"brightness-label\" for=\"brightness\">LED-Helligkeit</label><div class=\"brightness-row\"><input id=\"brightness\" type=\"range\" min=\"1\" max=\"100\" step=\"1\" value=\"50\"><output id=\"brightness-value\" for=\"brightness\">50 %</output></div></section><label>Betriebsart<select id=\"control-mode\"><option value=\"auto\">Auto (Jenkins)</option><option value=\"manual\">Manuell</option><option value=\"disco\">Disco</option><option value=\"api\">REST API</option></select></label><p id=\"mode-hint\" class=\"hint\"></p><label for=\"build-effect\">Laufender Jenkins-Build<select id=\"build-effect\"><option value=\"pulse\">Pulsieren</option><option value=\"blink\">Blinken (an/aus)</option></select></label><p class=\"hint\">Gilt für die Statusfarbe eines laufenden Jenkins-Builds.</p><section id=\"disco-controls\" class=\"disco-controls\" hidden><label for=\"disco-effect\">Disco-Animation<select id=\"disco-effect\" disabled><option value=\"rainbow\">Rainbow</option><option value=\"colorloop\">Colorloop</option><option value=\"chase\">Chase</option><option value=\"rainbow-chase\">Rainbow Chase</option><option value=\"blink\">Blink</option><option value=\"breathe\">Breathe</option><option value=\"twinkle\">Twinkle</option><option value=\"scan\">Scan</option><option value=\"theater-chase\">Theater Chase</option><option value=\"fireworks\">Fireworks</option></select></label><p class=\"hint\">Zehn kompakte Effekte, angelehnt an WLED.</p></section><div class=\"manual-controls\">"
         "<button type=\"button\" data-light=\"red\" data-enabled=\"false\" aria-pressed=\"false\" disabled>Rot: Aus</button>"
         "<button type=\"button\" data-light=\"yellow\" data-enabled=\"false\" aria-pressed=\"false\" disabled>Gelb: Aus</button>"
         "<button type=\"button\" data-light=\"green\" data-enabled=\"false\" aria-pressed=\"false\" disabled>Grün: Aus</button></div><div class=\"manual-color-controls\" aria-label=\"LED-Farben\"><label>Rot<input type=\"color\" data-light-color=\"red\" value=\"#ff0000\" disabled></label><label>Gelb<input type=\"color\" data-light-color=\"yellow\" value=\"#ffff00\" disabled></label><label>Grün<input type=\"color\" data-light-color=\"green\" value=\"#00ff00\" disabled></label></div><p id=\"light-state\" class=\"light-state\"></p><p class=\"hint\">Im API-Modus: <code>POST /api/status</code> mit <code>{\"status\":\"green\"}</code>.</p></section>"
@@ -2076,7 +2163,7 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "function showLogin(){adminAuthorization='';dashboard.inert=true;dashboard.setAttribute('aria-hidden','true');loginOverlay.hidden=false;loginPassword.value='';loginUsername.focus()}"
         "window.fetch=(input,options={})=>{if(typeof input!=='string'||!input.startsWith('/api/')||input==='/api/login')return nativeFetch(input,options);if(!adminAuthorization)return Promise.reject(new Error('Bitte anmelden.'));const headers=new Headers(options.headers);headers.set('Authorization',adminAuthorization);headers.set('X-Admin-UI','1');return nativeFetch(input,{...options,headers}).then(response=>{if(response.status===401){showLogin();throw new Error('Bitte erneut anmelden.')}return response})};"
         "loginForm.addEventListener('submit',async event=>{event.preventDefault();const username=loginUsername.value.trim(),password=loginPassword.value,button=loginForm.querySelector('button');button.disabled=true;loginError.textContent='';try{const response=await nativeFetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});if(!response.ok)throw new Error(await response.text());const bytes=new TextEncoder().encode(username+':'+password);adminAuthorization='Basic '+btoa(String.fromCharCode(...bytes));loginPassword.value='';loginOverlay.hidden=true;dashboard.inert=false;dashboard.setAttribute('aria-hidden','false');if(!dashboardStarted)startDashboard();else refreshDashboard()}catch(error){loginError.textContent=error.message}finally{button.disabled=false}});loginUsername.focus();"
-        "const select=document.querySelector('#job'),refreshJobs=document.querySelector('#refresh-jobs'),showJob=document.querySelector('#show-job'),jobListNote=document.querySelector('#job-list-note'),status=document.querySelector('#status'),pollInterval=document.querySelector('#poll-interval'),controlMode=document.querySelector('#control-mode'),modeHint=document.querySelector('#mode-hint'),discoControls=document.querySelector('#disco-controls'),discoEffect=document.querySelector('#disco-effect'),brightness=document.querySelector('#brightness'),brightnessValue=document.querySelector('#brightness-value'),toast=document.querySelector('#toast'),jobLoading=document.querySelector('#job-loading'),jenkinsLoading=document.querySelector('#jenkins-loading');"
+        "const select=document.querySelector('#job'),refreshJobs=document.querySelector('#refresh-jobs'),showJob=document.querySelector('#show-job'),jobListNote=document.querySelector('#job-list-note'),status=document.querySelector('#status'),pollInterval=document.querySelector('#poll-interval'),controlMode=document.querySelector('#control-mode'),modeHint=document.querySelector('#mode-hint'),buildEffect=document.querySelector('#build-effect'),discoControls=document.querySelector('#disco-controls'),discoEffect=document.querySelector('#disco-effect'),brightness=document.querySelector('#brightness'),brightnessValue=document.querySelector('#brightness-value'),toast=document.querySelector('#toast'),jobLoading=document.querySelector('#job-loading'),jenkinsLoading=document.querySelector('#jenkins-loading');"
         "const wifiForm=document.querySelector('#wifi-form'),wifiSsid=document.querySelector('#wifi-ssid'),wifiNetworks=document.querySelector('#wifi-networks'),wifiRefresh=document.querySelector('#wifi-refresh'),wifiScanStatus=document.querySelector('#wifi-scan-status'),savedWifi=document.querySelector('#saved-wifi');let wifiData=null,wifiTabLoaded=false,wifiTabLoading=false,wifiScanSource='';"
         "const brandingForms=[...document.querySelectorAll('[data-branding]')];let brandingData=null;"
         "const siteTitleHeading=document.querySelector('#site-title'),siteTitleButton=document.querySelector('#site-title-edit'),siteTitleInput=document.querySelector('#site-title-input');let savedSiteTitle='CI-Lights';"
@@ -2131,11 +2218,11 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "const states=[...document.querySelectorAll('[data-light]')].map(item=>uiI18n.t(lightLabels[item.dataset.light])+': '+uiI18n.t(item.dataset.enabled==='true'?'An':'Aus'));document.querySelector('#light-state').textContent=states.join(' | ')}"
         "let currentGrey=false;function setGreyDisplay(grey){currentGrey=grey;const svg=document.querySelector('#traffic-light').contentDocument;if(svg)svg.documentElement.classList.toggle('jenkins-grey',grey);if(grey)document.querySelector('#light-state').textContent=uiI18n.t('Jenkins: Grau')}"
         "async function loadLightStates(forceColor){const revision=lightColorRevision;const r=await fetch('/api/lights');if(!r.ok)throw new Error(await r.text());"
-        "const data=await r.json();for(const light of Object.keys(lightLabels)){setLightButton(light,data[light]);const color=document.querySelector('[data-light-color=\"'+light+'\"]');if(color&&revision===lightColorRevision){const serverColor=data[light+'_color'];if((light===forceColor||color.value===knownLightColors[light])&&color.value!==serverColor)color.value=serverColor;knownLightColors[light]=serverColor}}setGreyDisplay(data.mode==='auto'&&data.grey===true);const svg=document.querySelector('#traffic-light').contentDocument;if(svg)for(const light of Object.keys(lightLabels)){const lamp=svg.getElementById(light);if(lamp)lamp.classList.toggle('is-pulsing',data.mode==='auto'&&data.pulsing===true&&data[light]===true)}setControlMode(data.mode);discoEffect.value=data.disco_effect;setBrightness(data.brightness)}"
+        "const data=await r.json();for(const light of Object.keys(lightLabels)){setLightButton(light,data[light]);const color=document.querySelector('[data-light-color=\"'+light+'\"]');if(color&&revision===lightColorRevision){const serverColor=data[light+'_color'];if((light===forceColor||color.value===knownLightColors[light])&&color.value!==serverColor)color.value=serverColor;knownLightColors[light]=serverColor}}setGreyDisplay(data.mode==='auto'&&data.grey===true);const svg=document.querySelector('#traffic-light').contentDocument;if(svg)for(const light of Object.keys(lightLabels)){const lamp=svg.getElementById(light);if(lamp){lamp.classList.toggle('is-pulsing',data.mode==='auto'&&data.pulsing===true&&data[light]===true);lamp.classList.toggle('is-blinking',data.mode==='auto'&&data.blinking===true&&data[light]===true)}}setControlMode(data.mode);if(!buildEffect.disabled)buildEffect.value=data.build_effect;discoEffect.value=data.disco_effect;setBrightness(data.brightness)}"
         "document.querySelector('#jenkins-form').addEventListener('submit',async event=>{event.preventDefault();"
         "const r=await fetch('/api/jenkins',{method:'POST',headers:{'Content-Type':'application/json'},"
         "body:JSON.stringify(Object.fromEntries(new FormData(event.target)))});"
-        "if(await showSaveResult(r)){invalidateJobs();showTab('job')}});"
+        "if(await showSaveResult(r)){invalidateJobs();showTab('job');loadJobs().catch(error=>showStatus('Fehler: '+error.message,true))}});"
         "document.querySelector('#poll-interval-form').addEventListener('submit',async event=>{event.preventDefault();"
         "const minutes=Number(pollInterval.value);if(!Number.isInteger(minutes)||minutes<1){showStatus('Bitte mindestens 1 ganze Minute angeben.',true);return}"
         "const r=await fetch('/api/poll-interval',{method:'POST',headers:{'Content-Type':'application/json'},"
@@ -2146,6 +2233,7 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "wifiForm.addEventListener('submit',async event=>{event.preventDefault();const button=wifiForm.querySelector('[type=\"submit\"]');button.disabled=true;try{const r=await fetch('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(wifiForm)))});showStatus(await r.text(),!r.ok);if(!r.ok)button.disabled=false}catch(error){showStatus('Fehler: '+error.message,true);button.disabled=false}});"
         "controlMode.addEventListener('change',async()=>{const mode=controlMode.value;if(mode==='auto')setJenkinsLoading(true);try{const r=await fetch('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});if(await showSaveResult(r)){setControlMode(mode);loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true))}else loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true))}finally{if(mode==='auto')setJenkinsLoading(false)}});"
         "discoEffect.addEventListener('change',async()=>{const r=await fetch('/api/disco-effect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({effect:discoEffect.value})});if(!await showSaveResult(r))loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true))});"
+        "buildEffect.addEventListener('change',async()=>{buildEffect.disabled=true;try{const r=await fetch('/api/build-effect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({effect:buildEffect.value})});await showSaveResult(r)}catch(error){showStatus('Fehler: '+error.message,true)}finally{buildEffect.disabled=false;loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true))}});"
         "brightness.addEventListener('input',()=>setBrightness(brightness.value));brightness.addEventListener('change',async()=>{const r=await fetch('/api/brightness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brightness:Number(brightness.value)})});if(!await showSaveResult(r))loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true))});"
         "document.querySelectorAll('[data-light]').forEach(button=>button.addEventListener('click',async()=>{"
         "const enabled=button.dataset.enabled!=='true';"
@@ -2309,6 +2397,12 @@ static const httpd_uri_t status_brightness_uri = {
     .handler = status_brightness_handler,
 };
 
+static const httpd_uri_t status_build_effect_uri = {
+    .uri = "/api/build-effect",
+    .method = HTTP_POST,
+    .handler = status_build_effect_handler,
+};
+
 static const httpd_uri_t status_control_mode_uri = {
     .uri = "/api/mode",
     .method = HTTP_POST,
@@ -2371,7 +2465,7 @@ void app_start_status_server(const app_config_t *config,
     }
 
     httpd_config_t server_config = HTTPD_DEFAULT_CONFIG();
-    server_config.max_uri_handlers = 30;
+    server_config.max_uri_handlers = 31;
     server_config.stack_size = STATUS_HTTP_TASK_STACK_SIZE;
     server_config.lru_purge_enable = true;
     err = httpd_start(&s_status_server, &server_config);
@@ -2410,6 +2504,7 @@ void app_start_status_server(const app_config_t *config,
         (err = register_protected_uri(s_status_server, &status_manual_lights_state_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_disco_effect_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_brightness_uri)) != ESP_OK ||
+        (err = register_protected_uri(s_status_server, &status_build_effect_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_control_mode_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_api_status_uri)) != ESP_OK) {
         ESP_LOGE(TAG, "Status-Webserver konnte nicht eingerichtet werden: %s", esp_err_to_name(err));

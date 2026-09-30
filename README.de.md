@@ -2,7 +2,58 @@
 
 **Sprachen:** [English](README.md) | Deutsch
 
+**Projektinformation:** Der Code dieses Projekts wurde durch KI erstellt.
+
 > **Experimentelles Projekt - nicht produktionsreif.** Die Server-Zertifikatspruefung fuer WPA2-Enterprise ist zu Testzwecken deaktiviert, die lokale Verwaltung verwendet unverschluesseltes HTTP. Nur in einer vertrauenswuerdigen Testumgebung verwenden.
+
+## Entwicklungsumgebung mit Visual Studio Code einrichten
+
+1. [Visual Studio Code](https://code.visualstudio.com/) und die offizielle
+   [Espressif-IDF-Erweiterung](https://marketplace.visualstudio.com/items?itemName=espressif.esp-idf-extension)
+   installieren. In VS Code laesst sich die Erweiterung auch ueber
+   `Strg+Umschalt+X` und die Suche nach `ESP-IDF` finden.
+2. Mit `F1` die Befehlspalette oeffnen und
+   `ESP-IDF: Open ESP-IDF Installation Manager` ausfuehren. ESP-IDF **6.1.0**
+   samt Werkzeugen installieren. Danach
+   `ESP-IDF: Select Current ESP-IDF Version` ausfuehren und diese Installation
+   auswaehlen. Eine bereits vorhandene Installation kann direkt ausgewaehlt
+   werden, wenn die Erweiterung sie erkennt; sonst hilft die verlinkte
+   Anleitung zur manuellen Konfiguration. Bei Problemen prueft
+   `ESP-IDF: Doctor Command` die Einrichtung.
+   [Espressif-Installationsanleitung](https://docs.espressif.com/projects/vscode-esp-idf-extension/en/latest/installation.html)
+3. Dieses Repository mit Git klonen oder den bereits vorhandenen Projektordner
+   verwenden. In VS Code ueber `Datei > Ordner oeffnen` den Ordner
+   **CI-Lights** mit der obersten `CMakeLists.txt` oeffnen:
+
+   ```sh
+   git clone https://github.com/WR-Design-Dev/CI-Lights.git
+   ```
+
+   Es ist ein bestehendes Projekt; der Befehl `ESP-IDF: New Project` wird nicht
+   benoetigt. Fuer C/C++-IntelliSense kann
+   `ESP-IDF: Add VS Code Configuration Folder` die lokale
+   `.vscode`-Konfiguration erzeugen.
+4. Das Ziel muss `esp32s3` sein. Es ist in `sdkconfig` bereits gesetzt; falls
+   VS Code ein anderes Ziel anzeigt, `ESP-IDF: Set Espressif Device Target`
+   ausfuehren und `esp32s3` waehlen. Die vorhandene Konfiguration verwendet
+   **2 MB Flash**, eine eigene Partitionstabelle (`partitions.csv`) und
+   **2 MB Quad-PSRAM**. Diese Einstellungen beim Konfigurieren beibehalten.
+5. `ESP-IDF: Build your Project` ausfuehren. Beim ersten Build muss der
+   ESP-IDF Component Manager die Abhaengigkeiten cJSON und mDNS aus dem
+   Internet laden. Ein erfolgreicher Build erstellt `build/CI-Lights.bin`.
+6. Das ESP32-S3-Zero zum Flashen mit einem Daten-USB-Kabel im Download-Modus
+   verbinden. Das Board besitzt keinen USB-zu-UART-Chip: Dazu laut
+   [Waveshare-Dokumentation](https://docs.waveshare.com/ESP32-S3-Zero)
+   **BOOT** beim Anschliessen gedrueckt halten oder **BOOT** gedrueckt halten
+   und **RESET** betaetigen. Dann in VS Code `ESP-IDF: Select Port to Use`
+   ausfuehren und den seriellen Port (unter Windows z. B. `COMx`) waehlen.
+   `ESP-IDF: Flash your Project` starten und **UART** als Flash-Methode
+   auswaehlen. Nach dem Flashen **RESET** zum Starten der Firmware druecken.
+   [Espressif-Flash-Anleitung](https://docs.espressif.com/projects/vscode-esp-idf-extension/en/latest/flashdevice.html)
+7. Falls der Port nach dem Reset wechselt, ihn erneut mit
+   `ESP-IDF: Select Port to Use` waehlen. `ESP-IDF: Monitor Device` zeigt die Start- und
+   Diagnosemeldungen. Anschliessend die unten beschriebene WLAN-Ersteinrichtung
+   durchfuehren. [Espressif-Monitor-Anleitung](https://docs.espressif.com/projects/vscode-esp-idf-extension/en/latest/monitoroutput.html)
 
 Beim ersten Start ohne gespeicherte Konfiguration erstellt der ESP das
 WPA3-geschuetzte WLAN `ci-lights-xxxx-setup`. `xxxx` sind die letzten zwei
@@ -52,23 +103,25 @@ Auf dieser Verwaltungsseite werden zuerst Jenkins-URL, Jenkins-Benutzer und
 Jenkins-API-Token eingetragen. Anschliessend erscheint ein Dropdown mit den
 Jenkins-Jobs aus allen Ordnern und Unterordnern. Die Auswahl zeigt den
 Ordnerpfad vor dem Jobnamen, damit gleichnamige Jobs erkennbar bleiben.
-Die Jobliste wird nur ueber den kleinen Aktualisieren-Knopf neben dem Dropdown
-von Jenkins geladen. Nach dem Laden bleibt sie im Browser gespeichert und ist
-auch nach einem erneuten Oeffnen der Seite ohne neue Abfrage verfuegbar. Ein
+Nach dem Speichern der Jenkins-Zugangsdaten wird die Jobliste direkt geladen.
+Danach kann sie ueber den kleinen Aktualisieren-Knopf neben dem Dropdown erneut
+von Jenkins geladen werden. Die geladene Liste bleibt im Browser gespeichert
+und ist auch nach einem erneuten Oeffnen der Seite ohne neue Abfrage verfuegbar. Ein
 Reiterwechsel oder eine Anmeldung loest keine erneute Joblisten-Abfrage aus.
-Nach einer Aenderung der Jenkins-Zugangsdaten muss die Liste erneut per Knopf
-geladen werden.
+Nach einer Aenderung der Jenkins-Zugangsdaten wird die Liste automatisch neu geladen.
 Der ausgewaehlte Job wird dauerhaft gespeichert
 und sofort abgefragt. `blue` leuchtet gruen, `yellow` gelb, `red` rot; bei einem
-laufenden Build (`*_anime`) pulsiert die jeweilige Jenkins-Statusfarbe an den LEDs
-und in der Web-Ampel. Bei `grey`, `aborted` und `notbuilt` leuchtet nur die
+laufenden Build (`*_anime`) pulsiert oder blinkt die jeweilige Jenkins-Statusfarbe
+an den LEDs und in der Web-Ampel. Bei `grey`, `aborted` und `notbuilt` leuchtet nur die
 mittlere LED gedimmt grau; die obere und untere bleiben aus.
 `disabled` schaltet die Ampel vollstaendig aus (Schwarz). Noch ohne Jobauswahl leuchtet die
 Ampel gelb.
 
-Der Jobstatus wird beim Start sofort und anschließend standardmäßig alle fünf
-Minuten abgefragt. Im Reiter `Konfiguration` kann das Intervall als ganze Zahl
-in Minuten eingestellt werden; erlaubt sind Werte ab einer Minute. Eine Änderung
+Der Jobstatus wird beim Start sofort abgefragt. Bei einem vorübergehenden
+Fehler folgen zwei weitere Versuche im Abstand von fünf Sekunden. Anschließend
+wird er standardmäßig alle fünf Minuten abgefragt. Im Reiter `Konfiguration`
+kann das Intervall als ganze Zahl in Minuten eingestellt werden; erlaubt sind
+Werte ab einer Minute. Eine Änderung
 wird dauerhaft gespeichert und spätestens bei der nächsten Minutentakt-Prüfung
 wirksam.
 
@@ -178,6 +231,17 @@ jede Sekunde aktualisiert.
 
 ## Disco-Modus und LED-Helligkeit
 
+Im Reiter `Steuerung` laesst sich fuer laufende Jenkins-Builds zwischen
+`Pulsieren` und `Blinken (an/aus)` waehlen. Die Auswahl wird dauerhaft
+gespeichert und gilt auch nach einem Neustart. Ohne gespeicherten Wert ist
+`Pulsieren` voreingestellt. Per REST API kann der Effekt ebenfalls gesetzt werden:
+
+```sh
+curl -u BENUTZERNAME -X POST http://ci-lights-ID.local/api/build-effect \
+  -H "Content-Type: application/json" \
+  -d '{"effect":"blink"}'
+```
+
 Die Helligkeit steht im Reiter `Steuerung` und gilt fuer die externe
 WS2812-Ampel, die eingebaute RGB-LED und alle Betriebsarten. Sie ist von 1 bis
 100 Prozent einstellbar und wird dauerhaft gespeichert. Ohne zuvor gespeicherten
@@ -228,7 +292,8 @@ Der Tag `network` meldet WLAN-Trennungen mit Grund und RSSI sowie die
 Wiederverbindung. `lights_http` meldet angenommene/geschlossene Verbindungen,
 HTTP-Parserfehler und die Dauer von `GET /`, `GET /api/jobs` und `POST /api/mode`.
 Die drei POST-Aufrufe zur manuellen LED-Steuerung werden ebenfalls protokolliert.
-`GET /api/jobs` wird nur durch den Aktualisieren-Knopf der Jobliste ausgeloest.
+`GET /api/jobs` wird nach dem Speichern des Jenkins-Zugangs und durch den
+Aktualisieren-Knopf der Jobliste ausgeloest.
 
 Wenn bei `lights_http` zwar eine Verbindung angenommen wird, aber kein
 `GET /` oder API-Aufruf folgt, hilft der HTTP-Fehlercode beim Eingrenzen der
@@ -340,10 +405,11 @@ Es gibt bewusst keine OTA-Updates. Die einzige Firmware-Partition umfasst
 1,75 MiB des 2-MiB-Flashs und wird per USB geflasht. Die letzten 128 KiB
 sind fuer hochgeladenes Branding reserviert.
 
-Das Einrichtungs-WLAN ist absichtlich offen. Die WLAN-Zugangsdaten werden bei
-der Einrichtung daher unverschluesselt uebertragen und koennen in Funkreichweite
-mitgelesen oder veraendert werden. Jenkins-Zugangsdaten werden erst danach auf
-der Verwaltungsseite im lokalen WLAN eingegeben.
+Das Einrichtungs-WLAN ist mit WPA3-SAE und einem nach jedem Neustart neu
+erzeugten LED-Code geschuetzt. Das Captive Portal nutzt dennoch HTTP; wer
+Zugang zum Einrichtungsnetz erlangt, kann die dort eingegebenen WLAN-Daten bei
+einem aktiven Angriff mitlesen oder veraendern. Jenkins-Zugangsdaten werden erst
+danach auf der Verwaltungsseite im lokalen WLAN eingegeben.
 
 Verwendet Jenkins eine interne CA, muss deren Root-Zertifikat zusaetzlich in
 das ESP-IDF-Zertifikats-Bundle aufgenommen werden. Die TLS-Pruefung darf nicht
