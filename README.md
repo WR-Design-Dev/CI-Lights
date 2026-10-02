@@ -4,7 +4,7 @@
 
 **Project information:** The code for this project was created by AI.
 
-> **Experimental project — not production ready.** WPA2-Enterprise server certificate verification is disabled for testing, and the local administration interface uses unencrypted HTTP. Use only in a trusted test environment.
+> Use only in a separate IoT network.
 
 ## 3D print model
 

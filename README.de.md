@@ -4,7 +4,7 @@
 
 **Projektinformation:** Der Code dieses Projekts wurde durch KI erstellt.
 
-> **Experimentelles Projekt - nicht produktionsreif.** Die Server-Zertifikatspruefung fuer WPA2-Enterprise ist zu Testzwecken deaktiviert, die lokale Verwaltung verwendet unverschluesseltes HTTP. Nur in einer vertrauenswuerdigen Testumgebung verwenden.
+> Nur in einem separatem IoT-Netzwerk einsetzen.
 
 ## 3D-Druckmodell
 
