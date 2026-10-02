@@ -6,6 +6,10 @@
 
 > **Experimentelles Projekt - nicht produktionsreif.** Die Server-Zertifikatspruefung fuer WPA2-Enterprise ist zu Testzwecken deaktiviert, die lokale Verwaltung verwendet unverschluesseltes HTTP. Nur in einer vertrauenswuerdigen Testumgebung verwenden.
 
+## 3D-Druckmodell
+
+Das [3D-Druckmodell fuer die CI-Lights-Ampel findest du auf MakerWorld](https://makerworld.com/de/models/3352315-ci-lights).
+
 ## Installation im Browser und Firmware-Updates
 
 Die Installationsseite wird nach dem ersten erfolgreichen GitHub-Pages-Deployment

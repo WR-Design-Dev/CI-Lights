@@ -32,6 +32,8 @@ export const messages = {
     "updateText": "Open device administration and choose “Check for updates”. Select “Install update” to download the new firmware, verify it and restart the device.",
     "dataNote": "When reinstalling via USB, settings are kept if the erase option stays unchecked. “Erase all device data” clears the flash before installation. “Erase device” clears the entire flash without installing anything; no firmware remains afterwards. Keep the cable connected while writing or erasing.",
     "sourceLink": "Source on GitHub",
+    "modelLink": "3D print model on MakerWorld",
+    "modelFooter": "3D print model",
     "guideLink": "Guide",
     "guideHref": "https://github.com/WR-Design-Dev/CI-Lights/blob/main/README.md",
     "legalLink": "Legal notice",
@@ -107,6 +109,8 @@ export const messages = {
   "de": {
     "languageLabel": "Sprache",
     "sourceLink": "Quellcode auf GitHub",
+    "modelLink": "3D-Druckmodell auf MakerWorld",
+    "modelFooter": "3D-Druckmodell",
     "guideLink": "Anleitung",
     "guideHref": "https://github.com/WR-Design-Dev/CI-Lights/blob/main/README.de.md",
     "legalLink": "Impressum",

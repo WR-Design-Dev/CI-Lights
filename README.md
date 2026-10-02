@@ -6,6 +6,10 @@
 
 > **Experimental project — not production ready.** WPA2-Enterprise server certificate verification is disabled for testing, and the local administration interface uses unencrypted HTTP. Use only in a trusted test environment.
 
+## 3D print model
+
+Find the [CI-Lights 3D print model on MakerWorld](https://makerworld.com/de/models/3352315-ci-lights).
+
 ## Browser installation and firmware updates
 
 After the first successful GitHub Pages deployment, the installer is available
