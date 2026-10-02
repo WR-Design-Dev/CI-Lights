@@ -118,6 +118,8 @@ jobs:
     runs-on: ubuntu-24.04
     # Builds run for every push. Publication is serialized and never moves
     # the latest release back to an older build which happened to finish later.
+    # Only publish the current main commit; older targets can also be rejected
+    # by GitHub's workflow-scope restrictions when creating a release tag.
     concurrency:
       group: ci-lights-publication
       cancel-in-progress: false
@@ -145,6 +147,12 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         shell: bash
         run: |
+          main_sha="$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)"
+          if [[ "$main_sha" != "$GITHUB_SHA" ]]; then
+            echo "A newer main commit exists; this build remains available as an artifact."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if latest="$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name 2>release-api-error.txt)"; then
             :
           elif grep -q 'HTTP 404' release-api-error.txt; then
@@ -164,6 +172,7 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Publish signed release
+        id: release
         if: steps.latest.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -177,15 +186,29 @@ jobs:
             cmp release/SHA256SUMS previous-sums.txt
             gh release edit "v$VERSION" --latest
           else
-            gh release create "v$VERSION" release/* --target "$GITHUB_SHA" \
-              --title "CI-Lights $VERSION" --generate-notes --latest
+            if ! gh release create "v$VERSION" release/* --target "$GITHUB_SHA" \
+              --title "CI-Lights $VERSION" --generate-notes --latest 2>release-create-error.txt; then
+              # A push can move main after the preceding check. If GitHub then
+              # refuses a historical release target, leave publication to its newer build.
+              main_sha="$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)"
+              if [[ "$main_sha" != "$GITHUB_SHA" ]] &&
+                 grep -q 'HTTP 403: Resource not accessible by integration' release-create-error.txt &&
+                 ! gh release view "v$VERSION" > /dev/null 2>&1; then
+                echo "main advanced during publication; its newer build will publish."
+                echo "publish=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              cat release-create-error.txt >&2
+              exit 1
+            fi
           fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
       - name: Upload Pages artifact
-        if: steps.latest.outputs.publish == 'true'
+        if: steps.release.outputs.publish == 'true'
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: site/
       - name: Deploy browser installer
         id: deployment
-        if: steps.latest.outputs.publish == 'true'
+        if: steps.release.outputs.publish == 'true'
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

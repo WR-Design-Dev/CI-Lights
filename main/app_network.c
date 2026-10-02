@@ -44,13 +44,13 @@ static const char *wifi_disconnect_reason_name(uint8_t reason)
     case WIFI_REASON_ASSOC_FAIL:
         return "Anmeldung beim Access Point fehlgeschlagen";
     case WIFI_REASON_HANDSHAKE_TIMEOUT:
-        return "Authentifizierungs-Handshake Zeitueberschreitung";
+        return "Authentifizierungs-Handshake Zeitüberschreitung";
     case WIFI_REASON_CONNECTION_FAIL:
         return "Verbindungsaufbau fehlgeschlagen";
     case WIFI_REASON_BEACON_TIMEOUT:
         return "Access Point antwortet nicht mehr";
     case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY:
-        return "Kein Access Point mit passender Verschluesselung gefunden";
+        return "Kein Access Point mit passender Verschlüsselung gefunden";
     case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD:
         return "Kein Access Point mit passendem Sicherheitsmodus gefunden";
     case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD:
@@ -177,7 +177,7 @@ static bool configure_enterprise_wifi(const app_config_t *config)
 
     s_wifi_enterprise_enabled = true;
     ESP_LOGW(TAG, "WPA2-Enterprise aktiviert: PEAP und TTLS/MSCHAPv2 erlaubt; "
-             "Server-Zertifikatspruefung ist deaktiviert");
+             "Server-Zertifikatsprüfung ist deaktiviert");
     return true;
 }
 
@@ -185,13 +185,13 @@ bool app_connect_to_wifi(const app_config_t *config, uint32_t timeout_ms)
 {
     s_wifi_event_group = xEventGroupCreate();
     if (s_wifi_event_group == NULL) {
-        ESP_LOGE(TAG, "Kein Speicher fuer Wi-Fi-Ereignisse");
+        ESP_LOGE(TAG, "Kein Speicher für Wi-Fi-Ereignisse");
         return false;
     }
 
     s_wifi_sta_netif = esp_netif_create_default_wifi_sta();
     if (s_wifi_sta_netif == NULL) {
-        ESP_LOGE(TAG, "Kein Speicher fuer Wi-Fi-Station-Netzwerkinterface");
+        ESP_LOGE(TAG, "Kein Speicher für Wi-Fi-Station-Netzwerkinterface");
         vEventGroupDelete(s_wifi_event_group);
         s_wifi_event_group = NULL;
         return false;

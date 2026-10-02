@@ -1,18 +1,18 @@
 # Firmware-Updates und GitHub-Einrichtung
 
-Repository: `WR-Design-Dev/CI-Lights`, persoenliches Konto `WR-Design-Dev`.
+Repository: `WR-Design-Dev/CI-Lights`, persönliches Konto `WR-Design-Dev`.
 
 ## Einmalige GitHub-Einrichtung
 
-1. Den vorhandenen privaten Schluessel `secrets/ota_signing_key.pem` separat
-   verschluesselt sichern, zum Beispiel in einem verschluesselten Backup auf
-   einem anderen Datentraeger. Der Schluessel ist fuer weitere OTA-Updates
-   derselben Geraete erforderlich. Er wird von Git ignoriert. Die Datei
-   `ota_signing_public_key.sha256` enthaelt nur den oeffentlichen Fingerabdruck.
+1. Den vorhandenen privaten Schlüssel `secrets/ota_signing_key.pem` separat
+   verschlüsselt sichern, zum Beispiel in einem verschlüsselten Backup auf
+   einem anderen Datenträger. Der Schlüssel ist für weitere OTA-Updates
+   derselben Geräte erforderlich. Er wird von Git ignoriert. Die Datei
+   `ota_signing_public_key.sha256` enthält nur den öffentlichen Fingerabdruck.
 2. [GitHub CLI](https://cli.github.com/) installieren und als `WR-Design-Dev`
    anmelden: `gh auth login --scopes workflow`. Anmeldung und Zwei-Faktor-Code selbst eingeben;
-   weder Token noch privaten Schluessel in Chats oder Issues einfuegen.
-3. Im ESP-IDF-Terminal aus dem Projektordner zuerst pruefen:
+   weder Token noch privaten Schlüssel in Chats oder Issues einfügen.
+3. Im ESP-IDF-Terminal aus dem Projektordner zuerst prüfen:
 
    ```sh
    python tools/configure_github.py
@@ -24,27 +24,27 @@ Repository: `WR-Design-Dev/CI-Lights`, persoenliches Konto `WR-Design-Dev`.
    python tools/configure_github.py --apply
    ```
 
-   Das Skript prueft Konto, Eigentum und Administratorrechte. Es entfernt
+   Das Skript prüft Konto, Eigentum und Administratorrechte. Es entfernt
    fremde schreibberechtigte Mitarbeiter, ausstehende Mitarbeiter-Einladungen
-   und schreibberechtigte Deploy-Keys aus diesem Repository. Oeffentlicher
-   Lesezugriff und Pull Requests aus Forks bleiben moeglich. GitHub Actions
-   erhaelt nur im Veroeffentlichungsjob Schreibrechte fuer Releases.
+   und schreibberechtigte Deploy-Keys aus diesem Repository. Öffentlicher
+   Lesezugriff und Pull Requests aus Forks bleiben möglich. GitHub Actions
+   erhält nur im Veröffentlichungsjob Schreibrechte für Releases.
 
-   Anschliessend richtet es das Environment `firmware-signing` mit einer
-   Branch-Regel ausschliesslich fuer `main` ein. Der Schluessel wird ueber stdin
+   Anschließend richtet es das Environment `firmware-signing` mit einer
+   Branch-Regel außchließlich für `main` ein. Der Schlüssel wird über stdin
    als **Environment-Secret `OTA_SIGNING_KEY_PEM`** hochgeladen, ohne ihn in
    Kommandozeilenargumenten, Shell-Verlauf oder Ausgaben darzustellen. Ein
    gleichnamiges Repository-Secret wird entfernt. GitHub Pages wird auf
    **GitHub Actions** als Quelle gesetzt.
 
    Existiert das Signier-Environment bereits mit einer breiteren Freigabe,
-   bricht das Skript vor dem Schluessel-Upload ab. Unter **Settings > Environments
+   bricht das Skript vor dem Schlüssel-Upload ab. Unter **Settings > Environments
    > firmware-signing > Deployment branches and tags** dann **Selected branches
-   and tags** und ausschliesslich **Branch: main** einstellen und das Skript
-   erneut ausfuehren. Tags und Wildcards duerfen dort nicht erlaubt sein.
+   and tags** und außchließlich **Branch: main** einstellen und das Skript
+   erneut ausführen. Tags und Wildcards dürfen dort nicht erlaubt sein.
 
-5. Die geprueften Quelldateien inklusive `.github/workflows/firmware.yml`,
-   `tools/`, `web-flasher/`, `tests/` und des oeffentlichen Fingerabdrucks nach
+5. Die geprüften Quelldateien inklusive `.github/workflows/firmware.yml`,
+   `tools/`, `web-flasher/`, `tests/` und des öffentlichen Fingerabdrucks nach
    `main` pushen. `secrets/`, `build/`, `dist/` und lokale Backups bleiben lokal.
    Ein alter Git-Remote muss auf das richtige Repository zeigen:
 
@@ -53,71 +53,76 @@ Repository: `WR-Design-Dev/CI-Lights`, persoenliches Konto `WR-Design-Dev`.
    git remote set-url origin https://github.com/WR-Design-Dev/CI-Lights.git
    ```
 
-   Der erfolgreiche Workflow erstellt ein GitHub Release und veroeffentlicht
+   Der erfolgreiche Workflow erstellt ein GitHub Release und veröffentlicht
    die Installationsseite unter `https://wr-design-dev.github.io/CI-Lights/`.
    Vor dem ersten erfolgreichen Deployment ist diese Adresse noch nicht nutzbar.
 
 Die Einstellungen lassen sich auch manuell in GitHub vornehmen: **Settings >
-Collaborators** fuer Zugriff, **Settings > Environments** fuer das Secret und
-**Settings > Pages > Source: GitHub Actions** fuer die Installationsseite.
+Collaborators** für Zugriff, **Settings > Environments** für das Secret und
+**Settings > Pages > Source: GitHub Actions** für die Installationsseite.
 
-Impressum und Datenschutz sind ueber den Seitenfuss erreichbar. Die Betreiberangaben
+Impressum und Datenschutz sind über den Seitenfuß erreichbar. Die Betreiberangaben
 stammen von der eigenen Seite `lupiflash.ddns.net`; die Datenschutzhinweise
 beschreiben GitHub Pages, UNPKG und die lokale USB-Kommunikation dieser Seite.
 Die Flash-Seite startet auf Englisch. Mit den Flaggen **EN** und **DE** im
-Seitenkopf wechselst du die Sprache, einschliesslich Meldungen, Bestaetigungen
-und Rechtstexten. Die Auswahl bleibt ueber `?lang=en` beziehungsweise `?lang=de`
+Seitenkopf wechselst du die Sprache, einschließlich Meldungen, Bestätigungen
+und Rechtstexten. Die Auswahl bleibt über `?lang=en` beziehungsweise `?lang=de`
 beim Wechsel zwischen den Seiten erhalten; Cookies oder Browser-Speicher sind
-dafuer nicht erforderlich.
+dafür nicht erforderlich.
 Die Ampelgrafik stammt direkt aus `main/assets/TrafficLight.svg`, derselben
-Quelldatei wie die Grafik in der Verwaltungsoberflaeche.
+Quelldatei wie die Grafik in der Verwaltungsoberfläche.
 Farben, Karten, Buttons und Flaggen-Umschalter entsprechen dem Stil der
-Ampel-Verwaltung; die SVG-Flaggen wurden aus deren Umschalter uebernommen.
+Ampel-Verwaltung; die SVG-Flaggen wurden aus deren Umschalter übernommen.
 
 ## Automatischer Build
 
 - Jeder Push, jeder Pull Request und manuell gestartete Workflows bauen mit
-  ESP-IDF 6.1 fuer ESP32-S3.
+  ESP-IDF 6.1 für ESP32-S3.
 - `main` nutzt das vorhandene RSA-3072-Secret. Der Build vergleicht dessen
-  oeffentlichen Fingerabdruck mit dem Repository und verweigert einen anderen
-  Schluessel. Nach Build, Tests und Verpackung wird die temporaere PEM-Datei
-  im Runner geloescht.
-- Andere Branches und Pull Requests verwenden Wegwerf-Schluessel und haben
-  keinen Zugriff auf das Produktions-Environment. Ihre Artefakte dienen fuer
-  Entwicklungsgeraete mit USB-Flash und passen nicht zu produktiven OTA-Geraeten.
-- Ein erfolgreicher `main`-Build veroeffentlicht `v1.0.N`, wobei `N` die
+  öffentlichen Fingerabdruck mit dem Repository und verweigert einen anderen
+  Schlüssel. Nach Build, Tests und Verpackung wird die temporäre PEM-Datei
+  im Runner gelöscht.
+- Andere Branches und Pull Requests verwenden Wegwerf-Schlüssel und haben
+  keinen Zugriff auf das Produktions-Environment. Ihre Artefakte dienen für
+  Entwicklungsgeräte mit USB-Flash und passen nicht zu produktiven OTA-Geräten.
+- Ein erfolgreicher `main`-Build veröffentlicht `v1.0.N`, wobei `N` die
   Workflow-Laufnummer plus 1000 ist. Neuere Releases werden als Latest markiert.
-  Ein aelterer parallel fertiggestellter Build ersetzt Latest nicht.
-- Scheitert nur die Veroeffentlichung, **Re-run failed jobs** verwenden. Dadurch
-  werden dieselben signierten Dateien erneut fuer Pages verwendet. Ein kompletter
+  Ein älterer parallel fertiggestellter Build ersetzt Latest nicht.
+- Veröffentlicht wird der Build des aktuellen `main`-Commits. Hat ein weiterer
+  Push `main` inzwischen geändert, endet der ältere Build erfolgreich und
+  bleibt als Artefakt verfügbar; der neuere Build übernimmt die Veröffentlichung.
+  Damit werden auch GitHubs Einschränkungen bei Release-Tags für ältere
+  Commits berücksichtigt ([GitHub-Hinweis](https://github.blog/changelog/2023-11-02-github-actions-enforcing-workflow-scope-when-creating-a-release/)).
+- Scheitert nur die Veröffentlichung, **Re-run failed jobs** verwenden. Dadurch
+  werden dieselben signierten Dateien erneut für Pages verwendet. Ein kompletter
   Neubuild derselben Versionsnummer kann wegen neuer Build-Zeit andere Dateien
-  erzeugen; bestehende Release-Dateien werden dann nicht ueberschrieben. Fuer
+  erzeugen; bestehende Release-Dateien werden dann nicht überschrieben. Für
   eine neue Firmware einen neuen Push oder einen neuen manuellen Lauf starten.
 
-## Was wird veroeffentlicht?
+## Was wird veröffentlicht?
 
 | Datei | Verwendung |
 | --- | --- |
-| `CI-Lights.bin` | Signierte Anwendung fuer OTA und USB |
-| `ota-manifest.json` | Version, Groesse, SHA-256, Ziel-Chip, Layout und Release-URL |
-| `bootloader.bin`, `partition-table.bin`, `ota_data_initial.bin` | Einmalige vollstaendige USB-Installation |
-| `SHA256SUMS` | Pruefsummen der Release-Dateien |
+| `CI-Lights.bin` | Signierte Anwendung für OTA und USB |
+| `ota-manifest.json` | Version, Größe, SHA-256, Ziel-Chip, Layout und Release-URL |
+| `bootloader.bin`, `partition-table.bin`, `ota_data_initial.bin` | Einmalige vollständige USB-Installation |
+| `SHA256SUMS` | Prüfsummen der Release-Dateien |
 | `install-manifest.json` und Installationsseite | Browser-USB-Installation auf GitHub Pages |
 
 Die Browser-Firmware liegt neben der Webseite auf Pages, damit Downloads keine
-Freigaben fuer andere Domains benoetigen. OTA-Dateien liegen in oeffentlichen
+Freigaben für andere Domains benötigen. OTA-Dateien liegen in öffentlichen
 GitHub Releases; die Ampel braucht keine GitHub-Zugangsdaten.
 Espressifs esptool-js 0.6.1 wird erst nach Klick auf **Ampel per USB verbinden**
 und Port-Auswahl von `https://unpkg.com/esptool-js@0.6.1/bundle.js` geladen.
-Das Oeffnen der Seite laedt keine externen CDN-Skripte. Die Loeschoption ist
-standardmaessig deaktiviert. Vor dem Flashen werden Groesse und SHA-256 aller
-vier Dateien geprueft. Die Datenuebertragung erfolgt lokal per Web Serial.
-Der separate Button **Geraet loeschen** leert nach Bestaetigung den gesamten
-Flash ohne Neuinstallation. Er funktioniert auch ohne verfuegbaren Firmware-Download.
+Das Öffnen der Seite lädt keine externen CDN-Skripte. Die Löschoption ist
+standardmäßig deaktiviert. Vor dem Flashen werden Größe und SHA-256 aller
+vier Dateien geprüft. Die Datenübertragung erfolgt lokal per Web Serial.
+Der separate Button **Gerät löschen** leert nach Bestätigung den gesamten
+Flash ohne Neuinstallation. Er funktioniert auch ohne verfügbaren Firmware-Download.
 
 ## Flash-Aufteilung und Wiederherstellung
 
-| Bereich | Adresse | Groesse |
+| Bereich | Adresse | Größe |
 | --- | --- | --- |
 | NVS (Einstellungen) | `0x9000` | 24 KiB |
 | PHY | `0x10000` | 4 KiB |
@@ -127,41 +132,41 @@ Flash ohne Neuinstallation. Er funktioniert auch ohne verfuegbaren Firmware-Down
 | Firmware-Slot 1 | `0x200000` | 1,75 MiB |
 
 Die Datenadressen der bisherigen Firmware bleiben erhalten. Die erste Migration
-benoetigt Bootloader, Partitionstabelle, initiale OTA-Auswahl und Anwendung per
+benötigt Bootloader, Partitionstabelle, initiale OTA-Auswahl und Anwendung per
 USB; danach reicht die Anwendung per OTA. Bei einer erneuten Browser-Installation
-**Alle Geraetedaten loeschen** deaktiviert lassen, um bestehende Daten zu erhalten.
+**Alle Gerätedaten löschen** deaktiviert lassen, um bestehende Daten zu erhalten.
 
-Die neue Anwendung bestaetigt den Start erst nach erfolgreicher Initialisierung
+Die neue Anwendung bestätigt den Start erst nach erfolgreicher Initialisierung
 von Konfiguration, PSRAM und Webserver sowie zehn Sekunden Laufzeit. Ein Absturz
-oder Reset vor der Bestaetigung loest beim naechsten Start Rollback aus, wenn
-eine gueltige vorherige Firmware vorhanden ist. Ein erfolgreicher lokaler Start
-prueft nicht die Erreichbarkeit von Jenkins oder GitHub.
+oder Reset vor der Bestätigung löst beim nächsten Start Rollback aus, wenn
+eine gültige vorherige Firmware vorhanden ist. Ein erfolgreicher lokaler Start
+prüft nicht die Erreichbarkeit von Jenkins oder GitHub.
 
-GitHubs Oberflaeche und Secret-API zeigen einen gespeicherten Schluessel nicht
-wieder an; die Ampel enthaelt nur den oeffentlichen Schluessel. Deshalb eine
-separate Sicherung des privaten Schluessels behalten. Mit einem neuen Schluessel ist weiterhin eine komplette
-USB-Neuinstallation moeglich; bestehende Geraete akzeptieren ihn fuer OTA nicht.
-Hardware-Secure-Boot, Flash-Verschluesselung und Anti-Rollback-eFuses werden hier
-nicht aktiviert. Fuer diese Software-Signierung gibt es kein eFuse-Limit fuer
+GitHubs Oberfläche und Secret-API zeigen einen gespeicherten Schlüssel nicht
+wieder an; die Ampel enthält nur den öffentlichen Schlüssel. Deshalb eine
+separate Sicherung des privaten Schlüssels behalten. Mit einem neuen Schlüssel ist weiterhin eine komplette
+USB-Neuinstallation möglich; bestehende Geräte akzeptieren ihn für OTA nicht.
+Hardware-Secure-Boot, Flash-Verschlüsselung und Anti-Rollback-eFuses werden hier
+nicht aktiviert. Für diese Software-Signierung gibt es kein eFuse-Limit für
 erneutes USB-Flashen; jeder Schreibvorgang unterliegt der normalen Flash-Lebensdauer.
 
-## Wie bleibt der Schluessel geheim?
+## Wie bleibt der Schlüssel geheim?
 
-GitHub speichert das Secret verschluesselt und stellt es nur Jobs bereit, deren
-Environment-Regeln erfuellt sind. Der Workflow gibt nur den oeffentlichen
-Fingerabdruck aus und laedt ausschliesslich die festgelegten Firmware-Dateien
+GitHub speichert das Secret verschlüsselt und stellt es nur Jobs bereit, deren
+Environment-Regeln erfüllt sind. Der Workflow gibt nur den öffentlichen
+Fingerabdruck aus und lädt außchließlich die festgelegten Firmware-Dateien
 und die statische Webseite als Artefakte hoch. In der Firmware steckt der
-oeffentliche Schluessel, mit dem die Ampel die Signatur prueft.
+öffentliche Schlüssel, mit dem die Ampel die Signatur prüft.
 
-Waehrend des Signierens muss vertrauenswuerdiger Build-Code den privaten
-Schluessel lesen koennen. Alleinige Schreibrechte fuer `WR-Design-Dev` reduzieren
-den Personenkreis, der diesen Code aendern kann. Pruefe deshalb Aenderungen aus
+Während des Signierens muss vertraünswürdiger Build-Code den privaten
+Schlüssel lesen können. Alleinige Schreibrechte für `WR-Design-Dev` reduzieren
+den Personenkreis, der diesen Code ändern kann. Prüfe deshalb Änderungen aus
 Pull Requests vor dem Merge, insbesondere Workflows, Build-Skripte und Tests.
-GitHub-Apps mit Schreibrechten und die Zugangsdaten deines Kontos gehoeren
+GitHub-Apps mit Schreibrechten und die Zugangsdaten deines Kontos gehören
 ebenfalls zu diesem Vertrauensbereich. Die lokale PEM-Datei selbst ist nicht
-verschluesselt; Zugriffsrechte und ein verschluesseltes Backup schuetzen sie.
+verschlüsselt; Zugriffsrechte und ein verschlüsseltes Backup schützen sie.
 
-## Lokal pruefen
+## Lokal prüfen
 
 Nach einem signierten Build im ESP-IDF-Terminal:
 
@@ -172,9 +177,9 @@ python -m unittest discover -s tests -p 'test_*.py'
 python tools/package_firmware.py
 ```
 
-Die Paketpruefung weist falsche Chip-Ziele, falsche Versionsnummern, zu grosse
-oder unsignierte Images, veraenderte Flash-Adressen und beschaedigte Signaturen
-ab. `dist/release/` enthaelt die Release-Dateien, `dist/site/` die komplette Seite.
+Die Paketprüfung weist falsche Chip-Ziele, falsche Versionsnummern, zu große
+oder unsignierte Images, veränderte Flash-Adressen und beschädigte Signaturen
+ab. `dist/release/` enthält die Release-Dateien, `dist/site/` die komplette Seite.
 
 ## Quellen
 

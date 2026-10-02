@@ -26,7 +26,7 @@ static void factory_reset_task(void *argument)
                 pressed_since = xTaskGetTickCount();
             } else if (xTaskGetTickCount() - pressed_since >=
                        pdMS_TO_TICKS(FACTORY_RESET_HOLD_TIME_MS)) {
-                ESP_LOGW(TAG, "BOOT wurde 5 Sekunden gehalten; setze Einstellungen zurueck");
+                ESP_LOGW(TAG, "BOOT wurde 5 Sekunden gehalten; setze Einstellungen zurück");
                 if (app_config_factory_reset()) {
                     traffic_light_set(TRAFFIC_LIGHT_OFF);
                     vTaskDelay(pdMS_TO_TICKS(200));

@@ -26,7 +26,7 @@ typedef struct {
     uint8_t last_index;
 } app_wifi_profiles_t;
 
-/* Persistente Geraeteeinstellungen und gemeinsame Eingabepruefung. */
+/* Persistente Geräteeinstellungen und gemeinsame Eingabeprüfung. */
 bool app_config_copy_string(char *destination, size_t destination_size,
                             const char *source, bool required);
 bool app_config_wifi_is_valid(const app_config_t *config);

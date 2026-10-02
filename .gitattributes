@@ -1,0 +1,2 @@
+# Windows cmd requires CRLF when reading UTF-8 batch files.
+*.bat text eol=crlf

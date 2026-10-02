@@ -59,7 +59,7 @@ window.ciLightsOta = (() => {
         if (Date.now() - rebootStarted > 15000 && !status.busy) {
           waitingForReboot = false;
           status.phase = 'error';
-          status.message = 'Die neue Firmware wurde nicht gestartet oder zurueckgerollt.';
+          status.message = 'Die neue Firmware wurde nicht gestartet oder zurückgerollt.';
         }
       }
       render();
@@ -70,7 +70,7 @@ window.ciLightsOta = (() => {
           status.busy = false;
           status.boot_pending = false;
           status.phase = 'error';
-          status.message = 'Die Ampel ist noch nicht erreichbar. Verbindung pruefen und die Seite neu laden.';
+          status.message = 'Die Ampel ist noch nicht erreichbar. Verbindung prüfen und die Seite neu laden.';
           render();
         } else {
           message.textContent = uiI18n.t('Die Ampel startet neu. Verbindung wird wiederhergestellt.');

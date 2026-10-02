@@ -377,7 +377,7 @@ static esp_err_t download_image(const ota_manifest_t *manifest)
         goto done;
     }
     close_stream(stream);
-    set_phase("verifying", "Firmware-Signatur wird geprueft.");
+    set_phase("verifying", "Firmware-Signatur wird geprüft.");
     /* esp_ota_end verifies the image and its RSA signature before changing boot selection. */
     err = esp_ota_end(ota);
     ota_open = false;
@@ -397,8 +397,8 @@ static void update_task(void *argument)
     ota_manifest_t manifest = {0};
     esp_err_t err = fetch_manifest(&manifest);
     if (err != ESP_OK) {
-        set_error(err, err == ESP_ERR_NOT_FOUND ? "Noch kein oeffentliches Firmware-Release gefunden." :
-                  "Update-Pruefung fehlgeschlagen. Internet und Release-Dateien pruefen.");
+        set_error(err, err == ESP_ERR_NOT_FOUND ? "Noch kein öffentliches Firmware-Release gefunden." :
+                  "Update-Prüfung fehlgeschlagen. Internet und Release-Dateien prüfen.");
         goto done;
     }
     portENTER_CRITICAL(&s_status_lock);
@@ -409,9 +409,9 @@ static void update_task(void *argument)
         set_phase("up_to_date", "Die Firmware ist aktuell.");
         goto done;
     }
-    if (!install) { set_phase("available", "Neue Firmware ist verfuegbar."); goto done; }
+    if (!install) { set_phase("available", "Neue Firmware ist verfügbar."); goto done; }
     if (strcmp(manifest.version, s_requested_version) != 0) {
-        set_error(ESP_ERR_INVALID_STATE, "Das Release hat sich geaendert. Bitte erneut nach Updates suchen.");
+        set_error(ESP_ERR_INVALID_STATE, "Das Release hat sich geändert. Bitte erneut nach Updates suchen.");
         goto done;
     }
     set_phase("downloading", "Firmware wird heruntergeladen. Stromversorgung angeschlossen lassen.");
@@ -420,7 +420,7 @@ static void update_task(void *argument)
         set_error(err, "Update fehlgeschlagen. Die bisherige Firmware bleibt aktiv.");
         goto done;
     }
-    set_phase("rebooting", "Update geprueft. Die Ampel startet neu.");
+    set_phase("rebooting", "Update geprüft. Die Ampel startet neu.");
     vTaskDelay(pdMS_TO_TICKS(2000));
     esp_restart();
 done:
@@ -443,8 +443,8 @@ void app_ota_init(void)
     esp_ota_img_states_t state;
     s_status.boot_pending = esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
                             state == ESP_OTA_IMG_PENDING_VERIFY;
-    if (!s_status.configured) set_phase("disabled", "OTA-Partitionierung fehlt. Einmal vollstaendig per USB flashen.");
-    else if (s_status.boot_pending) set_phase("boot_validation", "Neue Firmware wird beim Start geprueft.");
+    if (!s_status.configured) set_phase("disabled", "OTA-Partitionierung fehlt. Einmal vollständig per USB flashen.");
+    else if (s_status.boot_pending) set_phase("boot_validation", "Neue Firmware wird beim Start geprüft.");
 }
 
 static void boot_validation_task(void *argument)
@@ -452,13 +452,13 @@ static void boot_validation_task(void *argument)
     vTaskDelay(pdMS_TO_TICKS(10000));
     esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Startpruefung konnte nicht bestaetigt werden: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Startprüfung konnte nicht bestätigt werden: %s", esp_err_to_name(err));
         esp_ota_mark_app_invalid_rollback_and_reboot();
     } else {
         portENTER_CRITICAL(&s_status_lock);
         s_status.boot_pending = false;
         s_status.phase = "idle";
-        s_status.message = "Startpruefung erfolgreich. Firmware bestaetigt.";
+        s_status.message = "Startprüfung erfolgreich. Firmware bestätigt.";
         portEXIT_CRITICAL(&s_status_lock);
     }
     vTaskDelete(NULL);
@@ -470,7 +470,7 @@ void app_ota_confirm_startup(bool web_server_ready)
     if (!web_server_ready || !s_status.configured ||
         heap_caps_get_total_size(MALLOC_CAP_SPIRAM) < 1024 * 1024 ||
         xTaskCreate(boot_validation_task, "ota_boot_check", 4096, NULL, 4, NULL) != pdPASS) {
-        ESP_LOGE(TAG, "Startpruefung fehlgeschlagen; kehre zur vorherigen Firmware zurueck");
+        ESP_LOGE(TAG, "Startprüfung fehlgeschlagen; kehre zur vorherigen Firmware zurück");
         esp_ota_mark_app_invalid_rollback_and_reboot();
         return;
     }
@@ -519,7 +519,7 @@ static esp_err_t start_update(httpd_req_t *request, bool install)
     int received = 0;
     while (received < request->content_len) {
         int count = httpd_req_recv(request, body + received, request->content_len - received);
-        if (count <= 0) return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Anfrage unvollstaendig.");
+        if (count <= 0) return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Anfrage unvollständig.");
         received += count;
     }
     cJSON *json = memchr(body, '\0', received) == NULL ? cJSON_ParseWithOpts(body, NULL, true) : NULL;
@@ -527,7 +527,7 @@ static esp_err_t start_update(httpd_req_t *request, bool install)
     uint32_t parts[3];
     if (!cJSON_IsObject(json) || (install && !parse_version(version, parts))) {
         cJSON_Delete(json);
-        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Ungueltige Firmware-Version.");
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Ungültige Firmware-Version.");
     }
     portENTER_CRITICAL(&s_status_lock);
     bool allowed = s_status.configured && !s_status.busy && !s_status.boot_pending &&
@@ -537,17 +537,17 @@ static esp_err_t start_update(httpd_req_t *request, bool install)
         if (install) strcpy(s_requested_version, version);
         s_status.busy = true;
         s_status.phase = "checking";
-        s_status.message = "GitHub-Release wird geprueft.";
+        s_status.message = "GitHub-Release wird geprüft.";
         s_status.bytes = 0;
     }
     portEXIT_CRITICAL(&s_status_lock);
     cJSON_Delete(json);
     if (!allowed) {
         httpd_resp_set_status(request, "409 Conflict");
-        return httpd_resp_sendstr(request, "Update beschaeftigt, noch nicht geprueft oder nicht eingerichtet.");
+        return httpd_resp_sendstr(request, "Update beschäftigt, noch nicht geprüft oder nicht eingerichtet.");
     }
     if (xTaskCreate(update_task, "ota_update", 12288, (void *) (uintptr_t) install, 3, NULL) != pdPASS) {
-        set_error(ESP_ERR_NO_MEM, "Nicht genug Speicher fuer das Update.");
+        set_error(ESP_ERR_NO_MEM, "Nicht genug Speicher für das Update.");
         portENTER_CRITICAL(&s_status_lock);
         s_status.busy = false;
         portEXIT_CRITICAL(&s_status_lock);

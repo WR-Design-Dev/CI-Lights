@@ -394,7 +394,7 @@ bool app_config_factory_reset(void)
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(SETTINGS_NAMESPACE, NVS_READWRITE, &nvs_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Einstellungen konnten nicht zum Zuruecksetzen geoeffnet werden: %s",
+        ESP_LOGE(TAG, "Einstellungen konnten nicht zum Zurücksetzen geöffnet werden: %s",
                  esp_err_to_name(err));
         return false;
     }
@@ -405,12 +405,12 @@ bool app_config_factory_reset(void)
     }
     nvs_close(nvs_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Einstellungen konnten nicht zurueckgesetzt werden: %s",
+        ESP_LOGE(TAG, "Einstellungen konnten nicht zurückgesetzt werden: %s",
                  esp_err_to_name(err));
         return false;
     }
 
-    ESP_LOGW(TAG, "WLAN- und Jenkins-Einstellungen wurden zurueckgesetzt");
+    ESP_LOGW(TAG, "WLAN- und Jenkins-Einstellungen wurden zurückgesetzt");
     return true;
 }
 

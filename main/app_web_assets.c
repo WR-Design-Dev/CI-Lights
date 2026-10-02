@@ -160,11 +160,11 @@ esp_err_t app_web_branding_upload_handler(httpd_req_t *request)
 {
     app_branding_kind_t kind;
     if (!requested_kind(request, &kind)) {
-        return branding_upload_error(request, "400 Bad Request", "Ungueltiger Branding-Typ.");
+        return branding_upload_error(request, "400 Bad Request", "Ungültiger Branding-Typ.");
     }
     if (request->content_len <= 0 || request->content_len > APP_BRANDING_MAX_BYTES) {
         return branding_upload_error(request, "413 Content Too Large",
-                                     "Datei ist zu gross (maximal 32 KiB).");
+                                     "Datei ist zu groß (maximal 32 KiB).");
     }
     char content_type[48];
     if (httpd_req_get_hdr_value_str(request, "Content-Type", content_type,
@@ -190,7 +190,7 @@ esp_err_t app_web_branding_upload_handler(httpd_req_t *request)
                                             MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (data == NULL) {
         return branding_upload_error(request, "500 Internal Server Error",
-                                     "Nicht genug Speicher fuer den Upload.");
+                                     "Nicht genug Speicher für den Upload.");
     }
     int received = 0;
     while (received < request->content_len) {

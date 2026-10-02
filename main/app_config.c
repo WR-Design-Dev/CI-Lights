@@ -149,7 +149,7 @@ static esp_err_t language_post_handler(httpd_req_t *request)
     char body[64];
     if (request->content_len <= 0 || request->content_len >= sizeof(body)) {
         httpd_resp_set_status(request, "400 Bad Request");
-        return httpd_resp_sendstr(request, "Ungueltige Sprache.");
+        return httpd_resp_sendstr(request, "Ungültige Sprache.");
     }
     int received = 0;
     while (received < request->content_len) {
@@ -176,7 +176,7 @@ static esp_err_t language_post_handler(httpd_req_t *request)
         httpd_resp_set_status(request, valid ? "500 Internal Server Error" : "400 Bad Request");
         return httpd_resp_sendstr(request, valid ?
                                   "Sprache konnte nicht gespeichert werden." :
-                                  "Ungueltige Sprache.");
+                                  "Ungültige Sprache.");
     }
     return language_get_handler(request);
 }
@@ -206,7 +206,7 @@ static esp_err_t site_title_post_handler(httpd_req_t *request)
 {
     char body[512];
     if (request->content_len <= 0 || request->content_len >= sizeof(body)) {
-        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Ungueltiger Titel.");
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Ungültiger Titel.");
     }
     int received = 0;
     while (received < request->content_len) {
@@ -231,7 +231,7 @@ static esp_err_t site_title_post_handler(httpd_req_t *request)
         return httpd_resp_send_err(request, valid && err != ESP_ERR_INVALID_ARG ?
                                    HTTPD_500_INTERNAL_SERVER_ERROR : HTTPD_400_BAD_REQUEST,
                                    valid && err != ESP_ERR_INVALID_ARG ?
-                                   "Titel konnte nicht gespeichert werden." : "Ungueltiger Titel.");
+                                   "Titel konnte nicht gespeichert werden." : "Ungültiger Titel.");
     }
     return site_title_get_handler(request);
 }
@@ -358,7 +358,7 @@ static esp_err_t provision_page_handler(httpd_req_t *request)
     char *page = malloc((size_t) page_length + 1);
     if (page == NULL) {
         return send_provision_error(request, "500 Internal Server Error",
-                                    "Nicht genug Speicher fuer die Einrichtungsseite.");
+                                    "Nicht genug Speicher für die Einrichtungsseite.");
     }
     snprintf(page, (size_t) page_length + 1, page_template,
              password_only_setup ? "Verwaltungszugang einrichten" : "WLAN einrichten",
@@ -475,7 +475,7 @@ static void captive_dns_task(void *argument)
                                       (struct sockaddr *) &client_address,
                                       &client_address_length);
         if (request_length < 0) {
-            ESP_LOGE(TAG, "Captive-Portal-DNS empfaengt keine Daten mehr: errno %d", errno);
+            ESP_LOGE(TAG, "Captive-Portal-DNS empfängt keine Daten mehr: errno %d", errno);
             break;
         }
 
@@ -703,7 +703,7 @@ static esp_err_t status_wifi_order_handler(httpd_req_t *request)
 {
     char body[256];
     if (request->content_len <= 0 || request->content_len >= sizeof(body)) {
-        return send_provision_error(request, "400 Bad Request", "Ungueltige WLAN-Reihenfolge.");
+        return send_provision_error(request, "400 Bad Request", "Ungültige WLAN-Reihenfolge.");
     }
     int received = 0;
     while (received < request->content_len) {
@@ -733,7 +733,7 @@ static esp_err_t status_wifi_order_handler(httpd_req_t *request)
     }
     cJSON_Delete(json);
     if (direction == 0) {
-        return send_provision_error(request, "400 Bad Request", "Ungueltige WLAN-Reihenfolge.");
+        return send_provision_error(request, "400 Bad Request", "Ungültige WLAN-Reihenfolge.");
     }
     esp_err_t err = app_wifi_profiles_move(ssid, direction);
     if (err == ESP_ERR_NOT_FOUND) {
@@ -749,14 +749,14 @@ static esp_err_t status_wifi_order_handler(httpd_req_t *request)
                                     "WLAN-Reihenfolge konnte nicht gespeichert werden.");
     }
     httpd_resp_set_type(request, "text/plain; charset=utf-8");
-    return httpd_resp_sendstr(request, "WLAN-Reihenfolge gespeichert. Gilt ab dem naechsten Neustart.");
+    return httpd_resp_sendstr(request, "WLAN-Reihenfolge gespeichert. Gilt ab dem nächsten Neustart.");
 }
 
 static esp_err_t status_wifi_delete_handler(httpd_req_t *request)
 {
     char body[128];
     if (request->content_len <= 0 || request->content_len >= sizeof(body)) {
-        return send_provision_error(request, "400 Bad Request", "Ungueltiger WLAN-Name.");
+        return send_provision_error(request, "400 Bad Request", "Ungültiger WLAN-Name.");
     }
     int received = 0;
     while (received < request->content_len) {
@@ -779,7 +779,7 @@ static esp_err_t status_wifi_delete_handler(httpd_req_t *request)
                  app_config_copy_string(ssid, sizeof(ssid), ssid_item->valuestring, true);
     cJSON_Delete(json);
     if (!valid) {
-        return send_provision_error(request, "400 Bad Request", "Ungueltiger WLAN-Name.");
+        return send_provision_error(request, "400 Bad Request", "Ungültiger WLAN-Name.");
     }
     esp_err_t err = app_wifi_profiles_remove(ssid);
     if (err == ESP_ERR_INVALID_STATE) {
@@ -795,7 +795,7 @@ static esp_err_t status_wifi_delete_handler(httpd_req_t *request)
     }
     httpd_resp_set_type(request, "text/plain; charset=utf-8");
     return httpd_resp_sendstr(request,
-                              "WLAN entfernt. Die Aenderung gilt nach dem naechsten Neustart.");
+                              "WLAN entfernt. Die Änderung gilt nach dem nächsten Neustart.");
 }
 
 static esp_err_t provision_wifi_networks_handler(httpd_req_t *request)
@@ -1048,7 +1048,7 @@ static cJSON *fetch_jenkins_job_level_once(const char *parent_url, size_t first_
                                   ? "" : "/",
                               first_job, first_job + JENKINS_JOB_PAGE_SIZE);
     if (url_length < 0 || url_length >= sizeof(request_url)) {
-        ESP_LOGE(TAG, "Jenkins-URL fuer die Jobliste ist zu lang");
+        ESP_LOGE(TAG, "Jenkins-URL für die Jobliste ist zu lang");
         return NULL;
     }
 
@@ -1087,7 +1087,7 @@ static cJSON *fetch_jenkins_job_level_once(const char *parent_url, size_t first_
     if (jenkins_json == NULL ||
         !cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(jenkins_json, "jobs"))) {
         cJSON_Delete(jenkins_json);
-        ESP_LOGE(TAG, "Jenkins lieferte keine gueltige Jobliste");
+        ESP_LOGE(TAG, "Jenkins lieferte keine gültige Jobliste");
         return NULL;
     }
     return jenkins_json;
@@ -1146,7 +1146,7 @@ static bool append_jenkins_job_level(cJSON *result_jobs, cJSON *folders,
 
         bool is_folder = jenkins_item_is_folder(job);
         if (is_folder && !jenkins_job_url_is_valid(url->valuestring)) {
-            ESP_LOGE(TAG, "Jenkins lieferte eine ungueltige Ordner-URL");
+            ESP_LOGE(TAG, "Jenkins lieferte eine ungültige Ordner-URL");
             free(display_name);
             return false;
         }
@@ -1177,13 +1177,13 @@ static esp_err_t status_jobs_handler(httpd_req_t *request)
     cJSON *result = cJSON_CreateObject();
     if (result == NULL) {
         return send_status_error(request, "500 Internal Server Error",
-                                 "Nicht genug Speicher fuer die Jobliste.");
+                                 "Nicht genug Speicher für die Jobliste.");
     }
     cJSON *result_jobs = cJSON_AddArrayToObject(result, "jobs");
     if (result_jobs == NULL) {
         cJSON_Delete(result);
         return send_status_error(request, "500 Internal Server Error",
-                                 "Nicht genug Speicher fuer die Jobliste.");
+                                 "Nicht genug Speicher für die Jobliste.");
     }
 
     if (s_status_config.jenkins_job_path[0] != '\0') {
@@ -1202,7 +1202,7 @@ static esp_err_t status_jobs_handler(httpd_req_t *request)
                 cJSON_AddStringToObject(result, "selected_url", selected_job_url) == NULL) {
                 cJSON_Delete(result);
                 return send_status_error(request, "500 Internal Server Error",
-                                         "Ausgewaehlter Job konnte nicht gelesen werden.");
+                                         "Ausgewählter Job konnte nicht gelesen werden.");
             }
         }
     }
@@ -1211,7 +1211,7 @@ static esp_err_t status_jobs_handler(httpd_req_t *request)
     if (folders == NULL) {
         cJSON_Delete(result);
         return send_status_error(request, "500 Internal Server Error",
-                                 "Nicht genug Speicher fuer die Jobliste.");
+                                 "Nicht genug Speicher für die Jobliste.");
     }
     const char *parent_url = s_status_config.jenkins_url;
     const char *parent_name = "";
@@ -1223,7 +1223,7 @@ static esp_err_t status_jobs_handler(httpd_req_t *request)
                 cJSON_Delete(folders);
                 cJSON_Delete(result);
                 return send_status_error(request, "502 Bad Gateway",
-                                         "Jenkins-Jobliste konnte nicht vollstaendig geladen werden.");
+                                         "Jenkins-Jobliste konnte nicht vollständig geladen werden.");
             }
             const cJSON *jenkins_jobs = cJSON_GetObjectItemCaseSensitive(jenkins_json, "jobs");
             int job_count = cJSON_GetArraySize(jenkins_jobs);
@@ -1234,7 +1234,7 @@ static esp_err_t status_jobs_handler(httpd_req_t *request)
                 cJSON_Delete(folders);
                 cJSON_Delete(result);
                 return send_status_error(request, "500 Internal Server Error",
-                                         "Jobliste konnte nicht vollstaendig erstellt werden.");
+                                         "Jobliste konnte nicht vollständig erstellt werden.");
             }
             if (job_count < JENKINS_JOB_PAGE_SIZE) {
                 break;
@@ -1437,7 +1437,7 @@ static esp_err_t status_job_handler(httpd_req_t *request)
 
     esp_err_t err = app_config_save_jenkins(&s_status_config);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Ausgewaehlter Job konnte nicht gespeichert werden: %s",
+        ESP_LOGE(TAG, "Ausgewählter Job konnte nicht gespeichert werden: %s",
                  esp_err_to_name(err));
         return send_status_error(request, "500 Internal Server Error",
                                  "Jobauswahl konnte nicht gespeichert werden.");
@@ -1766,14 +1766,14 @@ static esp_err_t status_disco_effect_handler(httpd_req_t *request)
 {
     if (s_disco_effect_handler == NULL || s_control_mode_state_handler == NULL) {
         return send_status_error(request, "503 Service Unavailable",
-                                 "Disco-Steuerung ist nicht verfuegbar.");
+                                 "Disco-Steuerung ist nicht verfügbar.");
     }
     if (s_control_mode_state_handler() != APP_CONTROL_MODE_DISCO) {
         return send_status_error(request, "409 Conflict",
                                  "Bitte zuerst den Disco-Modus aktivieren.");
     }
     if (request->content_len == 0 || request->content_len >= STATUS_REQUEST_MAX_LENGTH) {
-        return send_status_error(request, "400 Bad Request", "Ungueltige Disco-Animation.");
+        return send_status_error(request, "400 Bad Request", "Ungültige Disco-Animation.");
     }
 
     char request_body[STATUS_REQUEST_MAX_LENGTH];
@@ -1812,7 +1812,7 @@ static esp_err_t status_disco_effect_handler(httpd_req_t *request)
 static esp_err_t status_build_effect_handler(httpd_req_t *request)
 {
     if (request->content_len == 0 || request->content_len >= STATUS_REQUEST_MAX_LENGTH) {
-        return send_status_error(request, "400 Bad Request", "Ungueltiger Build-Effekt.");
+        return send_status_error(request, "400 Bad Request", "Ungültiger Build-Effekt.");
     }
 
     char request_body[STATUS_REQUEST_MAX_LENGTH];
@@ -1860,10 +1860,10 @@ static esp_err_t status_brightness_handler(httpd_req_t *request)
 {
     if (s_light_brightness_handler == NULL) {
         return send_status_error(request, "503 Service Unavailable",
-                                 "Helligkeitssteuerung ist nicht verfuegbar.");
+                                 "Helligkeitssteuerung ist nicht verfügbar.");
     }
     if (request->content_len == 0 || request->content_len >= STATUS_REQUEST_MAX_LENGTH) {
-        return send_status_error(request, "400 Bad Request", "Ungueltige Helligkeit.");
+        return send_status_error(request, "400 Bad Request", "Ungültige Helligkeit.");
     }
 
     char request_body[STATUS_REQUEST_MAX_LENGTH];
@@ -1923,7 +1923,7 @@ static esp_err_t status_cpu_mode_get_handler(httpd_req_t *request)
 static esp_err_t status_cpu_mode_post_handler(httpd_req_t *request)
 {
     if (request->content_len <= 0 || request->content_len >= STATUS_REQUEST_MAX_LENGTH) {
-        return send_status_error(request, "400 Bad Request", "Ungueltiger CPU-Modus.");
+        return send_status_error(request, "400 Bad Request", "Ungültiger CPU-Modus.");
     }
     char request_body[STATUS_REQUEST_MAX_LENGTH];
     int received = 0;
@@ -1948,7 +1948,7 @@ static esp_err_t status_cpu_mode_post_handler(httpd_req_t *request)
                  app_cpu_mode_from_name(mode_name->valuestring, &mode);
     cJSON_Delete(json);
     if (!valid) {
-        return send_status_error(request, "400 Bad Request", "Ungueltiger CPU-Modus.");
+        return send_status_error(request, "400 Bad Request", "Ungültiger CPU-Modus.");
     }
 
     app_cpu_mode_t previous = app_cpu_current_mode();
@@ -2182,14 +2182,14 @@ static esp_err_t status_device_info_handler(httpd_req_t *request)
                             cJSON_AddNumberToObject(info, "wifi_channel", access_point.primary) == NULL))) {
         cJSON_Delete(info);
         return send_status_error(request, "500 Internal Server Error",
-                                 "Geraetedaten konnten nicht erstellt werden.");
+                                 "Gerätedaten konnten nicht erstellt werden.");
     }
 
     char *body = cJSON_PrintUnformatted(info);
     cJSON_Delete(info);
     if (body == NULL) {
         return send_status_error(request, "500 Internal Server Error",
-                                 "Geraetedaten konnten nicht erstellt werden.");
+                                 "Gerätedaten konnten nicht erstellt werden.");
     }
     httpd_resp_set_type(request, "application/json; charset=utf-8");
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
@@ -2256,7 +2256,7 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "<section id=\"tab-job\" class=\"tab active\" role=\"tabpanel\"><h2>Jenkins-Job</h2>"
         "<p>Wähle den Job, dessen Status die Ampel anzeigen soll.</p>"
         "<form id=\"job-form\"><div class=\"job-picker\"><label>Jenkins-Job<select id=\"job\" required disabled></select></label><button id=\"refresh-jobs\" class=\"job-refresh\" type=\"button\" aria-label=\"Jobliste aktualisieren\" title=\"Jobliste aktualisieren\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M20 11a8 8 0 1 0-2.3 6.7M20 4v7h-7\"/></svg></button></div><p id=\"job-list-note\" class=\"job-list-note\" role=\"status\">Liste noch nicht geladen.</p>"
-        "<button id=\"show-job\" type=\"submit\" disabled>Job anzeigen</button></form></section></div></div></section><details id=\"ota-details\" class=\"device-footer ota-settings\" aria-labelledby=\"ota-title\"><summary id=\"ota-title\">Firmware-Updates</summary><p class=\"hint\">Installiere eine neue Firmware direkt ueber WLAN. Die Ampel startet danach neu.</p><p>Installiert: <strong id=\"ota-current\">?</strong> | Verfuegbar: <strong id=\"ota-latest\">?</strong></p><div class=\"ota-actions\"><button id=\"ota-check\" type=\"button\" disabled>Nach Updates suchen</button><button id=\"ota-install\" type=\"button\" hidden disabled>Update installieren</button></div><progress id=\"ota-progress\" max=\"100\" value=\"0\" hidden aria-label=\"Update-Fortschritt\"></progress><p id=\"ota-message\" class=\"hint\" role=\"status\">Noch nicht nach Updates gesucht.</p></details><details id=\"board-details\" class=\"device-footer\"><summary>Mikrocontroller</summary><div id=\"device-info\" class=\"device-info\"><p class=\"device-message\">Gerätedaten werden geladen ...</p></div></details></main><div id=\"toast\" role=\"status\" aria-live=\"polite\"></div><div id=\"job-loading\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Jobliste wird geladen\" aria-hidden=\"true\"><div class=\"job-loading-card\"><span class=\"spinner\" aria-hidden=\"true\"></span><span>Jobliste wird geladen ...</span></div></div><div id=\"jenkins-loading\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Jenkins-Status wird abgefragt\" aria-hidden=\"true\"><div class=\"job-loading-card\"><span class=\"spinner\" aria-hidden=\"true\"></span><span>Jenkins-Status wird abgefragt ...</span></div></div>"
+        "<button id=\"show-job\" type=\"submit\" disabled>Job anzeigen</button></form></section></div></div></section><details id=\"ota-details\" class=\"device-footer ota-settings\" aria-labelledby=\"ota-title\"><summary id=\"ota-title\">Firmware-Updates</summary><p class=\"hint\">Installiere eine neue Firmware direkt über WLAN. Die Ampel startet danach neu.</p><p>Installiert: <strong id=\"ota-current\">?</strong> | Verfügbar: <strong id=\"ota-latest\">?</strong></p><div class=\"ota-actions\"><button id=\"ota-check\" type=\"button\" disabled>Nach Updates suchen</button><button id=\"ota-install\" type=\"button\" hidden disabled>Update installieren</button></div><progress id=\"ota-progress\" max=\"100\" value=\"0\" hidden aria-label=\"Update-Fortschritt\"></progress><p id=\"ota-message\" class=\"hint\" role=\"status\">Noch nicht nach Updates gesucht.</p></details><details id=\"board-details\" class=\"device-footer\"><summary>Mikrocontroller</summary><div id=\"device-info\" class=\"device-info\"><p class=\"device-message\">Gerätedaten werden geladen ...</p></div></details></main><div id=\"toast\" role=\"status\" aria-live=\"polite\"></div><div id=\"job-loading\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Jobliste wird geladen\" aria-hidden=\"true\"><div class=\"job-loading-card\"><span class=\"spinner\" aria-hidden=\"true\"></span><span>Jobliste wird geladen ...</span></div></div><div id=\"jenkins-loading\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Jenkins-Status wird abgefragt\" aria-hidden=\"true\"><div class=\"job-loading-card\"><span class=\"spinner\" aria-hidden=\"true\"></span><span>Jenkins-Status wird abgefragt ...</span></div></div>"
         "<script src=\"/localization.js\"></script><script src=\"/ota.js\"></script><script>const loginOverlay=document.querySelector('#login-overlay'),loginForm=document.querySelector('#login-form'),loginUsername=document.querySelector('#login-username'),loginPassword=document.querySelector('#login-password'),loginError=document.querySelector('#login-error'),dashboard=document.querySelector('#dashboard'),nativeFetch=window.fetch.bind(window);let adminAuthorization='',dashboardStarted=false;"
         "function showLogin(){adminAuthorization='';dashboard.inert=true;dashboard.setAttribute('aria-hidden','true');loginOverlay.hidden=false;loginPassword.value='';loginUsername.focus()}"
         "window.fetch=(input,options={})=>{if(typeof input!=='string'||!input.startsWith('/api/')||input==='/api/login')return nativeFetch(input,options);if(!adminAuthorization)return Promise.reject(new Error('Bitte anmelden.'));const headers=new Headers(options.headers);headers.set('Authorization',adminAuthorization);headers.set('X-Admin-UI','1');return nativeFetch(input,{...options,headers}).then(response=>{if(response.status===401){showLogin();throw new Error('Bitte erneut anmelden.')}return response})};"
@@ -2275,7 +2275,7 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "async function loadSiteTitle(){const r=await fetch('/api/site-title',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());const data=await r.json();savedSiteTitle=data.title;siteTitleHeading.textContent=data.title;if(siteTitleInput.hidden)siteTitleInput.value=data.title;document.title=data.title}"
         "async function loadBranding(){const r=await fetch('/api/branding',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());brandingData=await r.json();renderBranding()}"
         "let savedCpuMode='fixed160';async function loadCpuMode(){const r=await fetch('/api/cpu-mode',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());const data=await r.json();savedCpuMode=data.mode;cpuMode.value=data.mode}"
-        "async function uploadBranding(event){event.preventDefault();const form=event.target,kind=form.dataset.branding,input=form.querySelector('input'),file=input.files[0],button=form.querySelector('button');if(!file)return;const name=file.name.toLowerCase();let mime='';if(name.endsWith('.png'))mime='image/png';else if(kind==='logo'&&name.endsWith('.svg'))mime='image/svg+xml';else if(kind==='favicon'&&name.endsWith('.ico'))mime='image/x-icon';if(!mime){showStatus('Nicht unterstuetzter Dateityp.',true);return}if(file.size===0||file.size>32748){showStatus('Datei ist zu gross (maximal 32 KiB).',true);return}button.disabled=true;input.disabled=true;try{const r=await fetch('/api/branding?kind='+kind,{method:'PUT',headers:{'Content-Type':mime},body:file});if(await showSaveResult(r)){input.value='';await loadBranding();if(kind==='logo'){const image=document.querySelector('.brand img');image.parentElement.classList.remove('has-banner');image.src='/logo.svg?v='+Date.now()}else document.querySelector('link[rel=icon]').href='/favicon.ico?v='+Date.now()}}catch(error){showStatus('Fehler: '+error.message,true)}finally{button.disabled=false;input.disabled=false}}"
+        "async function uploadBranding(event){event.preventDefault();const form=event.target,kind=form.dataset.branding,input=form.querySelector('input'),file=input.files[0],button=form.querySelector('button');if(!file)return;const name=file.name.toLowerCase();let mime='';if(name.endsWith('.png'))mime='image/png';else if(kind==='logo'&&name.endsWith('.svg'))mime='image/svg+xml';else if(kind==='favicon'&&name.endsWith('.ico'))mime='image/x-icon';if(!mime){showStatus('Nicht unterstützter Dateityp.',true);return}if(file.size===0||file.size>32748){showStatus('Datei ist zu groß (maximal 32 KiB).',true);return}button.disabled=true;input.disabled=true;try{const r=await fetch('/api/branding?kind='+kind,{method:'PUT',headers:{'Content-Type':mime},body:file});if(await showSaveResult(r)){input.value='';await loadBranding();if(kind==='logo'){const image=document.querySelector('.brand img');image.parentElement.classList.remove('has-banner');image.src='/logo.svg?v='+Date.now()}else document.querySelector('link[rel=icon]').href='/favicon.ico?v='+Date.now()}}catch(error){showStatus('Fehler: '+error.message,true)}finally{button.disabled=false;input.disabled=false}}"
         "const deviceInfo=document.querySelector('#device-info'),boardDetails=document.querySelector('#board-details');"
         "function formatBytes(value){return Number(value).toLocaleString(uiI18n.language==='de'?'de-DE':'en-US')+' B'}"
         "function formatMhz(hz){return hz?(hz/1000000).toLocaleString(uiI18n.language==='de'?'de-DE':'en-US',{maximumFractionDigits:1})+' MHz':uiI18n.t('Unbekannt')}"
@@ -2328,7 +2328,7 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "const r=await fetch('/api/poll-interval',{method:'POST',headers:{'Content-Type':'application/json'},"
         "body:JSON.stringify({poll_interval_minutes:minutes})});await showSaveResult(r)});"
         "brandingForms.forEach(form=>form.addEventListener('submit',uploadBranding));const bannerForm=document.querySelector('#banner-form'),bannerFile=document.querySelector('#banner-file');bannerForm.querySelector('.banner-upload').addEventListener('click',()=>bannerFile.click());bannerFile.addEventListener('change',()=>{if(bannerFile.files.length)bannerForm.requestSubmit()});"
-        "function closeSiteTitleEditor(){siteTitleInput.hidden=true;siteTitleButton.hidden=false;siteTitleButton.setAttribute('aria-expanded','false')}siteTitleButton.addEventListener('click',()=>{if(siteTitleButton.disabled)return;siteTitleInput.value=siteTitleHeading.textContent;siteTitleButton.hidden=true;siteTitleInput.hidden=false;siteTitleButton.setAttribute('aria-expanded','true');siteTitleInput.focus();siteTitleInput.select()});siteTitleInput.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();siteTitleInput.blur()}else if(event.key==='Escape'){siteTitleInput.value=savedSiteTitle;siteTitleInput.blur()}});siteTitleInput.addEventListener('blur',async()=>{const title=siteTitleInput.value.trim();closeSiteTitleEditor();if(title===savedSiteTitle)return;if(!title){siteTitleInput.value=savedSiteTitle;showStatus('Ungueltiger Titel.',true);return}siteTitleHeading.textContent=title;document.title=title;siteTitleButton.disabled=true;try{const r=await fetch('/api/site-title',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title})});if(!r.ok)throw new Error(await r.text());const data=await r.json();savedSiteTitle=data.title;siteTitleHeading.textContent=data.title;siteTitleInput.value=data.title;document.title=data.title;showStatus('');showToast('Titel gespeichert.')}catch(error){siteTitleHeading.textContent=savedSiteTitle;siteTitleInput.value=savedSiteTitle;document.title=savedSiteTitle;showStatus('Fehler: '+error.message,true)}finally{siteTitleButton.disabled=false}});"
+        "function closeSiteTitleEditor(){siteTitleInput.hidden=true;siteTitleButton.hidden=false;siteTitleButton.setAttribute('aria-expanded','false')}siteTitleButton.addEventListener('click',()=>{if(siteTitleButton.disabled)return;siteTitleInput.value=siteTitleHeading.textContent;siteTitleButton.hidden=true;siteTitleInput.hidden=false;siteTitleButton.setAttribute('aria-expanded','true');siteTitleInput.focus();siteTitleInput.select()});siteTitleInput.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();siteTitleInput.blur()}else if(event.key==='Escape'){siteTitleInput.value=savedSiteTitle;siteTitleInput.blur()}});siteTitleInput.addEventListener('blur',async()=>{const title=siteTitleInput.value.trim();closeSiteTitleEditor();if(title===savedSiteTitle)return;if(!title){siteTitleInput.value=savedSiteTitle;showStatus('Ungültiger Titel.',true);return}siteTitleHeading.textContent=title;document.title=title;siteTitleButton.disabled=true;try{const r=await fetch('/api/site-title',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title})});if(!r.ok)throw new Error(await r.text());const data=await r.json();savedSiteTitle=data.title;siteTitleHeading.textContent=data.title;siteTitleInput.value=data.title;document.title=data.title;showStatus('');showToast('Titel gespeichert.')}catch(error){siteTitleHeading.textContent=savedSiteTitle;siteTitleInput.value=savedSiteTitle;document.title=savedSiteTitle;showStatus('Fehler: '+error.message,true)}finally{siteTitleButton.disabled=false}});"
         "wifiRefresh.addEventListener('click',()=>loadWifiNetworks().catch(error=>showWifiScanStatus('Fehler: '+error.message)));"
         "wifiForm.addEventListener('submit',async event=>{event.preventDefault();const button=wifiForm.querySelector('[type=\"submit\"]');button.disabled=true;try{const r=await fetch('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(wifiForm)))});showStatus(await r.text(),!r.ok);if(!r.ok)button.disabled=false}catch(error){showStatus('Fehler: '+error.message,true);button.disabled=false}});"
         "cpuMode.addEventListener('change',async()=>{const selected=cpuMode.value;cpuMode.disabled=true;try{const r=await fetch('/api/cpu-mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:selected})});if(await showSaveResult(r)){savedCpuMode=selected;if(boardDetails.open)loadDeviceInfo()}else cpuMode.value=savedCpuMode}catch(error){cpuMode.value=savedCpuMode;showStatus('Fehler: '+error.message,true)}finally{cpuMode.disabled=false}});"
@@ -2672,7 +2672,7 @@ void app_start_status_server(const app_config_t *config,
     err = mdns_service_add("CI-Lights", "_http", "_tcp", server_config.server_port,
                            NULL, 0);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "HTTP-mDNS-Dienst konnte nicht angekuendigt werden: %s",
+        ESP_LOGW(TAG, "HTTP-mDNS-Dienst konnte nicht angekündigt werden: %s",
                  esp_err_to_name(err));
     }
     ESP_LOGI(TAG, "Ampel-Webseite: http://%s.local", s_light_hostname);
@@ -2708,7 +2708,7 @@ void app_start_provisioning(void)
         snprintf(s_provision_ssid, sizeof(s_provision_ssid),
                  "ci-lights-%02x%02x-setup", mac[4], mac[5]);
     } else {
-        ESP_LOGW(TAG, "MAC-Adresse fuer Einrichtungs-WLAN nicht lesbar: %s",
+        ESP_LOGW(TAG, "MAC-Adresse für Einrichtungs-WLAN nicht lesbar: %s",
                  esp_err_to_name(err));
         snprintf(s_provision_ssid, sizeof(s_provision_ssid), "ci-lights-setup");
     }

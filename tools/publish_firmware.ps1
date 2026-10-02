@@ -1,20 +1,20 @@
-<#
-Windows-Helfer fuer publish.bat; Voraussetzungen und Beispiele stehen dort.
-Keine Passwoerter oder Schluessel eintragen: gh nutzt seine gespeicherte
+﻿<#
+Windows-Helfer für publish.bat; Voraussetzungen und Beispiele stehen dort.
+Keine Passwörter oder Schlüssel eintragen: gh nutzt seine gespeicherte
 Anmeldung, GitHub Actions den bereits eingerichteten Environment-Secret.
 
 Standard: Browser-Tests, lokaler signierter ESP-IDF-Build, Signatur-/Pakettests,
 lokales Paket unter dist/local, Commit/Push nach main und GitHub-Build abwarten.
-GitHub baut erneut aus dem Commit und veroeffentlicht seine eigene CI-Version.
+GitHub baut erneut aus dem Commit und veröffentlicht seine eigene CI-Version.
 -SkipLocalBuild: lokale Browser-Tests und GitHub-Build ohne lokalen OTA-Key/SDK.
--CheckOnly: Voraussetzungen pruefen, nichts bauen oder veroeffentlichen.
--Yes: Commit-Bestaetigung fuer ausdruecklich gewollte Automatisierung auslassen.
+-CheckOnly: Voraussetzungen prüfen, nichts bauen oder veröffentlichen.
+-Yes: Commit-Bestätigung für ausdrücklich gewollte Automatisierung auslassen.
 
-Ein leerer Git-Index ist erforderlich; bereits vorgemerkte Aenderungen zuerst
+Ein leerer Git-Index ist erforderlich; bereits vorgemerkte Änderungen zuerst
 selbst committen oder gezielt aus dem Index nehmen. main darf eigene neue
 Commits enthalten, muss aber den aktuellen origin/main-Stand enthalten.
-Bei einem veralteten Branch zuerst selbst git pull --ff-only ausfuehren.
-Es gibt keinen Force-Push, keine Schluesselerzeugung und kein Hardware-Flashing.
+Bei einem veralteten Branch zuerst selbst git pull --ff-only ausführen.
+Es gibt keinen Force-Push, keine Schlüsselerzeugung und kein Hardware-Flashing.
 Nach einem CI-Fehler zeigt das Skript den Lauf-Link und beendet sich mit Fehler.
 #>
 [CmdletBinding()]
@@ -27,6 +27,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
+$env:PYTHONUTF8 = '1'
 $repository = 'WR-Design-Dev/CI-Lights'
 $workflow = 'firmware.yml'
 $originalLocation = Get-Location
@@ -67,16 +70,16 @@ try {
         throw "Kein CI-Lights-Projekt in $root gefunden."
     }
     $branch = Get-Checked $git @('branch', '--show-current')
-    if ($branch -ne 'main') { throw 'Veroeffentlichung ist nur auf Branch main erlaubt.' }
+    if ($branch -ne 'main') { throw 'Veröffentlichung ist nur auf Branch main erlaubt.' }
     $remote = Get-Checked $git @('remote', 'get-url', 'origin')
     if ($remote -notmatch '^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)WR-Design-Dev/CI-Lights(?:\.git)?/?$') {
         throw 'origin muss auf WR-Design-Dev/CI-Lights zeigen.'
     }
     $staged = Get-Checked $git @('diff', '--cached', '--name-only')
-    if ($staged) { throw 'Der Git-Index ist nicht leer. Vorgemerkte Aenderungen zuerst selbst bearbeiten.' }
+    if ($staged) { throw 'Der Git-Index ist nicht leer. Vorgemerkte Änderungen zuerst selbst bearbeiten.' }
     foreach ($state in @('MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply')) {
         $statePath = Get-Checked $git @('rev-parse', '--git-path', $state)
-        if (Test-Path -LiteralPath $statePath) { throw "Zuerst den laufenden Git-Vorgang abschliessen: $state" }
+        if (Test-Path -LiteralPath $statePath) { throw "Zuerst den laufenden Git-Vorgang abschließen: $state" }
     }
 
     $node = (Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
@@ -89,7 +92,7 @@ try {
     else {
         $gh = Join-Path $root 'build\github-cli\bin\gh.exe'
         if (-not (Test-Path -LiteralPath $gh -PathType Leaf)) {
-            throw 'GitHub CLI installieren und gh auth login ausfuehren (siehe publish.bat).'
+            throw 'GitHub CLI installieren und gh auth login ausführen (siehe publish.bat).'
         }
     }
     $login = Get-Checked $gh @('api', 'user', '--jq', '.login')
@@ -115,18 +118,18 @@ try {
         Write-Host "ESP-IDF: $IdfPath; vorhandener lokaler OTA-Key wird verwendet."
     }
     if ($CheckOnly) {
-        Write-Host 'Voraussetzungen erfuellt. Kein Build, Commit oder Push ausgefuehrt.'
+        Write-Host 'Voraussetzungen erfüllt. Kein Build, Commit oder Push ausgeführt.'
         exit 0
     }
 
     $env:GIT_TERMINAL_PROMPT = '0'
-    # Nur fuer diese Befehle gh als Credential-Helfer nutzen, keine globale Git-Konfiguration aendern.
+    # Nur für diese Befehle gh als Credential-Helfer nutzen, keine globale Git-Konfiguration ändern.
     $ghShellPath = $gh.Replace('\', '/').Replace("'", "'\''")
     $gitAuth = @('-c', 'credential.helper=', '-c', "credential.helper=!'$ghShellPath' auth git-credential")
     Invoke-Checked $git ($gitAuth + @('fetch', 'origin', 'main'))
     & $git merge-base --is-ancestor origin/main HEAD
     if ($LASTEXITCODE -ne 0) {
-        throw 'main ist veraltet oder verzweigt. Zuerst git pull --ff-only ausfuehren und Konflikte selbst klaeren.'
+        throw 'main ist veraltet oder verzweigt. Zuerst git pull --ff-only ausführen und Konflikte selbst klären.'
     }
 
     Write-Host "`nBrowser- und Skript-Tests ..."
@@ -170,7 +173,7 @@ try {
         if ($idfVersion -notmatch 'ESP-IDF v6\.1(?:[.\s-]|$)') {
             throw "ESP-IDF 6.1 erforderlich; gefunden: $idfVersion"
         }
-        # --generate wird nur bei bereits vorhandenem Key aufgerufen: Identitaet pruefen und Key wiederverwenden.
+        # --generate wird nur bei bereits vorhandenem Key aufgerufen: Identität prüfen und Key wiederverwenden.
         if (-not (Test-Path -LiteralPath 'secrets\ota_signing_key.pem' -PathType Leaf)) {
             throw 'Lokaler OTA-Key fehlt; Build abgebrochen.'
         }
@@ -186,19 +189,19 @@ try {
     Invoke-Checked $git @('-c', 'core.whitespace=cr-at-eol', 'diff', '--check')
     # Build, dist, secrets und Backups sind per .gitignore ausgeschlossen; COM-Port bleibt lokal.
     Invoke-Checked $git @('add', '--all', '--', '.', ':(exclude).vscode/settings.json')
-    # Auch versehentlich in andere Dateien kopierte PEM-Privatschluessel nie veroeffentlichen.
+    # Auch versehentlich in andere Dateien kopierte PEM-Privatschlüssel nie veröffentlichen.
     $privateFiles = & $git grep --cached -I -l -E -e '-----BEGIN ([A-Z0-9]+ )?PRIVATE KEY-----' -- .
     if ($LASTEXITCODE -eq 0) {
-        throw "Private Schluessel im Git-Index erkannt. Kein Commit/Push. Dateien aus dem Index nehmen: $($privateFiles -join ', ')"
+        throw "Private Schlüssel im Git-Index erkannt. Kein Commit/Push. Dateien aus dem Index nehmen: $($privateFiles -join ', ')"
     }
-    if ($LASTEXITCODE -ne 1) { throw 'Pruefung des Git-Index auf private Schluessel fehlgeschlagen.' }
+    if ($LASTEXITCODE -ne 1) { throw 'Prüfung des Git-Index auf private Schlüssel fehlgeschlagen.' }
     Invoke-Checked $git @('-c', 'core.whitespace=cr-at-eol', 'diff', '--cached', '--check')
     $staged = Get-Checked $git @('diff', '--cached', '--name-only')
     if ($staged) {
-        Write-Host "`nDiese Aenderungen werden veroeffentlicht:"
+        Write-Host "`nDiese Änderungen werden veröffentlicht:"
         Invoke-Checked $git @('diff', '--cached', '--stat')
-        if (-not $Yes -and (Read-Host 'Commit und Veroeffentlichung bestaetigen: JA eingeben') -cne 'JA') {
-            Write-Host 'Abgebrochen. Dateien bleiben zur Pruefung im Git-Index; nichts hochgeladen.'
+        if (-not $Yes -and (Read-Host 'Commit und Veröffentlichung bestätigen: JA eingeben') -cne 'JA') {
+            Write-Host 'Abgebrochen. Dateien bleiben zur Prüfung im Git-Index; nichts hochgeladen.'
             exit 0
         }
         if (-not $Message) {
@@ -216,7 +219,7 @@ try {
         Invoke-Checked $git ($gitAuth + @('push', 'origin', 'main'))
         $event = 'push'
     } else {
-        Write-Host 'Keine neuen Commits. Neuer GitHub-Build wird fuer den aktuellen Stand gestartet.'
+        Write-Host 'Keine neuen Commits. Neuer GitHub-Build wird für den aktuellen Stand gestartet.'
         Invoke-Checked $gh @('workflow', 'run', $workflow, '--repo', $repository, '--ref', 'main')
         $event = 'workflow_dispatch'
     }
@@ -227,10 +230,10 @@ try {
         $run = Find-NewWorkflowRun $runsJson $head $previousIds
         if (-not $run) { Start-Sleep -Seconds 5 }
     } while (-not $run -and [DateTime]::UtcNow -lt $deadline)
-    if (-not $run) { throw "GitHub-Lauf noch nicht gefunden. Status pruefen: https://github.com/$repository/actions" }
-    Write-Host "`nGitHub baut, signiert und veroeffentlicht: $($run.url)"
+    if (-not $run) { throw "GitHub-Lauf noch nicht gefunden. Status prüfen: https://github.com/$repository/actions" }
+    Write-Host "`nGitHub baut, signiert und veröffentlicht: $($run.url)"
     Invoke-Checked $gh @('run', 'watch', [string]$run.databaseId, '--repo', $repository, '--interval', '15', '--exit-status')
-    Write-Host "`nErfolgreich veroeffentlicht."
+    Write-Host "`nErfolgreich veröffentlicht."
     Write-Host "Firmware: https://github.com/$repository/releases/latest"
     Write-Host 'Flash-Seite: https://wr-design-dev.github.io/CI-Lights/'
 } catch {

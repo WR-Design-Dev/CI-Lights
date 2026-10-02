@@ -61,13 +61,13 @@ static bool update_traffic_light_from_response(const http_response_t *response)
 
     cJSON *json = cJSON_Parse(response->body);
     if (json == NULL) {
-        ESP_LOGW(TAG, "Jenkins-Antwort ist kein gueltiges JSON");
+        ESP_LOGW(TAG, "Jenkins-Antwort ist kein gültiges JSON");
         return false;
     }
 
     cJSON *color = cJSON_GetObjectItemCaseSensitive(json, "color");
     if (!cJSON_IsString(color) || color->valuestring == NULL) {
-        ESP_LOGW(TAG, "Jenkins-Antwort enthaelt keinen Job-Status");
+        ESP_LOGW(TAG, "Jenkins-Antwort enthält keinen Job-Status");
         cJSON_Delete(json);
         return false;
     }
@@ -115,7 +115,7 @@ static bool jenkins_client_request_internal(const app_config_t *config, bool sho
     if (config == NULL || config->jenkins_url[0] == '\0' ||
         config->jenkins_user[0] == '\0' || config->jenkins_token[0] == '\0' ||
         config->jenkins_job_path[0] == '\0') {
-        ESP_LOGE(TAG, "Jenkins-Konfiguration ist unvollstaendig");
+        ESP_LOGE(TAG, "Jenkins-Konfiguration ist unvollständig");
         traffic_light_set(TRAFFIC_LIGHT_RED);
         traffic_light_start_error_sos_animation();
         return false;

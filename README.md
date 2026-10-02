@@ -21,7 +21,7 @@ the OTA partition layout requires one complete USB installation.
 The custom installer loads esptool-js 0.6.1 from UNPKG after connecting.
 English is the default language. The **EN** and **DE** flag buttons in the header
 switch the entire installer, including status messages and legal pages.
-Its separate **Geraet loeschen** button erases the whole flash after confirmation,
+Its separate **Gerät löschen** button erases the whole flash after confirmation,
 without installing firmware. Legal notice and privacy links are in the footer.
 
 For subsequent updates, open device administration, choose **Check for updates**,

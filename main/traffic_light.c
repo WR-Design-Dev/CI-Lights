@@ -451,7 +451,7 @@ static bool init_ws2812(rmt_channel_handle_t *channel, rmt_encoder_handle_t *enc
 {
     *mutex = xSemaphoreCreateMutex();
     if (*mutex == NULL) {
-        ESP_LOGW(TAG, "Kein Speicher fuer %s", light_name);
+        ESP_LOGW(TAG, "Kein Speicher für %s", light_name);
         return false;
     }
 
@@ -470,7 +470,7 @@ static bool init_ws2812(rmt_channel_handle_t *channel, rmt_encoder_handle_t *enc
         err = rmt_new_simple_encoder(&encoder_config, encoder);
     }
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "%s ist nicht verfuegbar: %s", light_name, esp_err_to_name(err));
+        ESP_LOGW(TAG, "%s ist nicht verfügbar: %s", light_name, esp_err_to_name(err));
         return false;
     }
 
@@ -707,7 +707,7 @@ void traffic_light_start_provision_code_animation(
     }
     for (size_t i = 0; i < TRAFFIC_LIGHT_PROVISION_CODE_LENGTH; ++i) {
         if (symbols[i] >= TRAFFIC_LIGHT_PROVISION_SYMBOL_COUNT) {
-            ESP_LOGE(TAG, "Ungueltiges Einrichtungs-Codezeichen");
+            ESP_LOGE(TAG, "Ungültiges Einrichtungs-Codezeichen");
             return;
         }
     }
