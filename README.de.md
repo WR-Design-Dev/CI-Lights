@@ -442,6 +442,37 @@ und Pull Requests verwenden Wegwerf-Schluessel und veroeffentlichen keine Update
 Die CI-Version lautet `1.0.(1000 + Workflow-Laufnummer)`; sie wird ueber
 `CI_LIGHTS_RELEASE_VERSION` festgelegt, ohne `version.txt` zu veraendern.
 
+### Unter Windows bauen und veroeffentlichen
+
+Starte `publish.bat` im Projektordner oder per Doppelklick. Die Kommentare
+am Anfang des Skripts enthalten die Voraussetzungen und Einrichtungsbefehle
+fuer Git, Node.js, GitHub CLI und ESP-IDF 6.1.
+
+Das Skript prueft die Browser-Oberflaechen, baut und signiert die Firmware
+lokal mit dem vorhandenen Originalschluessel und prueft Signatur sowie
+Installationspakete. Danach zeigt es die Projektdateien vor dem Commit an;
+mit `JA` bestaetigst du Commit und Push nach `main`. GitHub baut erneut,
+signiert mit seinem Environment-Secret und veroeffentlicht Release und
+Flash-Seite. Das Skript wartet bis zum Abschluss und zeigt die Links.
+
+```bat
+publish.bat -Message "Meine Aenderung"
+publish.bat -CheckOnly
+publish.bat -SkipLocalBuild
+```
+
+`-CheckOnly` prueft Voraussetzungen ohne Build oder Veroeffentlichung.
+`-SkipLocalBuild` laesst den lokalen SDK-Build aus; GitHub baut und signiert
+weiterhin. Dafuer sind lokal weder ESP-IDF noch der private OTA-Schluessel
+noetig. Ohne neue Commits wird ein neuer GitHub-Build manuell gestartet.
+`-Yes` ueberspringt die Commit-Bestaetigung fuer bewusst gewollte Automatisierung.
+
+Der Git-Index muss vor dem Start leer sein. Der Branch muss `main` sein und
+den aktuellen `origin/main` enthalten. Das Skript nimmt alle geaenderten
+Projektdateien auf; `.vscode/settings.json`, Git-ignorierte Schluessel,
+Backups und Build-Dateien bleiben lokal. Passwoerter und Tokens gehoeren
+nicht in das Skript. Ein vorhandener OTA-Schluessel wird wiederverwendet.
+
 Die Firmware wird mit `-Os` auf geringe Flash-Groesse optimiert. SDK-Info-Logs
 werden beim Uebersetzen entfernt; die benoetigten WLAN- und Einrichtungshinweise
 bleiben erhalten. Fuer den Platzbedarf im Flash zaehlt `build/CI-Lights.bin`;

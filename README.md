@@ -427,6 +427,36 @@ requests use disposable signing keys and do not publish updates. CI versions
 are `1.0.(1000 + workflow run number)`, selected through
 `CI_LIGHTS_RELEASE_VERSION` without changing `version.txt`.
 
+### Build and publish on Windows
+
+Run `publish.bat` from the project folder or double-click it. Its opening
+comments list the prerequisites and setup commands for Git, Node.js,
+GitHub CLI and ESP-IDF 6.1.
+
+The script tests the browser interfaces, builds and signs the firmware locally
+with the existing original key, and checks the signature and installation
+packages. It then shows the project files before committing; enter `JA` to
+confirm the commit and push to `main`. GitHub rebuilds, signs with its environment
+secret, and publishes the release and flash website. The script waits for
+completion and displays the links.
+
+```bat
+publish.bat -Message "My change"
+publish.bat -CheckOnly
+publish.bat -SkipLocalBuild
+```
+
+`-CheckOnly` checks prerequisites without building or publishing.
+`-SkipLocalBuild` skips the local SDK build; GitHub still builds and signs.
+This mode needs neither ESP-IDF nor the private OTA key on your computer.
+With no new commits, the script manually starts a new GitHub build.
+`-Yes` skips commit confirmation for deliberate automation.
+
+Start with an empty Git staging area, on `main`, with the current `origin/main`
+included in your branch. The script stages all changed project files;
+`.vscode/settings.json`, Git-ignored keys, backups and build files stay local.
+Never put passwords or tokens in the script. The existing OTA key is reused.
+
 The firmware uses `-Os` to optimize flash size. SDK info logs are removed at
 compile time; essential Wi-Fi and setup messages remain. Flash usage is measured
 by `build/CI-Lights.bin`; the much larger ELF and map files also contain debugging
