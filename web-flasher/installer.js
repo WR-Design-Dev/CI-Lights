@@ -16,11 +16,34 @@ const erase = document.querySelector('#erase');
 const progress = document.querySelector('#flash-progress');
 const release = document.querySelector('#release-link');
 const lightPreview = document.querySelector('#traffic-light-preview');
+const lightPhases = [
+  {lights: ['red'], duration: 3000},
+  {lights: ['red', 'yellow'], duration: 900},
+  {lights: ['green'], duration: 3000},
+  {lights: ['yellow'], duration: 900},
+];
+let lightTimer;
 function lightPreviewReady() {
-  lightPreview.contentDocument?.getElementById('green')?.classList.add('is-on');
+  clearTimeout(lightTimer);
+  const lamps = ['red', 'yellow', 'green'].map(color =>
+    lightPreview.contentDocument?.getElementById(color));
+  if (lamps.some(lamp => !lamp)) return;
+  let phaseIndex = 0;
+  function nextPhase() {
+    const phase = lightPhases[phaseIndex];
+    for (const lamp of lamps) {
+      lamp.classList.toggle('is-on', phase.lights.includes(lamp.id));
+    }
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      phaseIndex = (phaseIndex + 1) % lightPhases.length;
+      lightTimer = setTimeout(nextPhase, phase.duration);
+    }
+  }
+  nextPhase();
 }
 if (lightPreview) {
   lightPreview.addEventListener('load', lightPreviewReady);
+  window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', lightPreviewReady);
   lightPreviewReady();
 }
 let manifest;
