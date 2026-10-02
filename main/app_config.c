@@ -1,4 +1,9 @@
+/* Retain setup instructions when other components compile warnings only. */
+#define LOG_LOCAL_LEVEL ESP_LOG_INFO
+
 #include "app_config.h"
+#include "app_cpu.h"
+#include "app_ota.h"
 #include "app_settings.h"
 #include "app_web_assets.h"
 #include "jenkins_client.h"
@@ -101,6 +106,8 @@ static bool request_has_admin_credentials(httpd_req_t *request)
 
 static esp_err_t protected_handler(httpd_req_t *request)
 {
+    bool boosted = app_cpu_boost_begin();
+    esp_err_t err;
     if (app_admin_password_is_set() && !request_has_admin_credentials(request)) {
         httpd_resp_set_status(request, "401 Unauthorized");
         char ui_request[2];
@@ -111,10 +118,13 @@ static esp_err_t protected_handler(httpd_req_t *request)
                                "Basic realm=\"CI-Lights\", charset=\"UTF-8\"");
         }
         httpd_resp_set_hdr(request, "Cache-Control", "no-store");
-        return httpd_resp_sendstr(request, "Verwaltungspasswort erforderlich.");
+        err = httpd_resp_sendstr(request, "Verwaltungspasswort erforderlich.");
+    } else {
+        const httpd_uri_t *original = request->user_ctx;
+        err = original->handler(request);
     }
-    const httpd_uri_t *original = request->user_ctx;
-    return original->handler(request);
+    app_cpu_boost_end(boosted);
+    return err;
 }
 
 static esp_err_t register_protected_uri(httpd_handle_t server, const httpd_uri_t *uri)
@@ -254,12 +264,7 @@ static void status_http_event_handler(void *arg, esp_event_base_t event_base,
 
     if (event_id == HTTP_SERVER_EVENT_ERROR && event_data != NULL) {
         httpd_err_code_t code = *(const httpd_err_code_t *) event_data;
-        ESP_LOGW(HTTP_TAG, "HTTP-Serverfehler %d; interner Heap frei %lu B",
-                 code, (unsigned long) heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-    } else if (event_id == HTTP_SERVER_EVENT_ON_CONNECTED && event_data != NULL) {
-        ESP_LOGI(HTTP_TAG, "HTTP-Verbindung angenommen: Socket %d", *(const int *) event_data);
-    } else if (event_id == HTTP_SERVER_EVENT_DISCONNECTED && event_data != NULL) {
-        ESP_LOGI(HTTP_TAG, "HTTP-Verbindung geschlossen: Socket %d", *(const int *) event_data);
+        ESP_LOGW(HTTP_TAG, "HTTP-Serverfehler %d", code);
     }
 }
 
@@ -369,8 +374,6 @@ static esp_err_t provision_page_handler(httpd_req_t *request)
  * setup page makes its captive-portal window render the local form. */
 static esp_err_t provision_redirect_handler(httpd_req_t *request)
 {
-    ESP_LOGI(TAG, "Captive-Portal-Anfrage '%s' wird zur Einrichtungsseite umgeleitet",
-             request->uri);
     httpd_resp_set_status(request, "302 Found");
     httpd_resp_set_hdr(request, "Location", "/");
     httpd_resp_set_type(request, "text/plain; charset=utf-8");
@@ -696,6 +699,59 @@ static esp_err_t status_wifi_get_handler(httpd_req_t *request)
     return err;
 }
 
+static esp_err_t status_wifi_order_handler(httpd_req_t *request)
+{
+    char body[256];
+    if (request->content_len <= 0 || request->content_len >= sizeof(body)) {
+        return send_provision_error(request, "400 Bad Request", "Ungueltige WLAN-Reihenfolge.");
+    }
+    int received = 0;
+    while (received < request->content_len) {
+        int count = httpd_req_recv(request, body + received,
+                                   request->content_len - received);
+        if (count == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if (count <= 0) {
+            return send_provision_error(request, "400 Bad Request",
+                                        "WLAN-Reihenfolge konnte nicht gelesen werden.");
+        }
+        received += count;
+    }
+    body[received] = '\0';
+    cJSON *json = cJSON_Parse(body);
+    const cJSON *ssid_item = cJSON_GetObjectItemCaseSensitive(json, "ssid");
+    const cJSON *direction_item = cJSON_GetObjectItemCaseSensitive(json, "direction");
+    char ssid[APP_WIFI_SSID_MAX_LENGTH + 1];
+    bool valid = cJSON_IsString(ssid_item) && cJSON_IsString(direction_item) &&
+                 app_config_copy_string(ssid, sizeof(ssid), ssid_item->valuestring, true);
+    int8_t direction = 0;
+    if (valid && strcmp(direction_item->valuestring, "up") == 0) {
+        direction = -1;
+    } else if (valid && strcmp(direction_item->valuestring, "down") == 0) {
+        direction = 1;
+    }
+    cJSON_Delete(json);
+    if (direction == 0) {
+        return send_provision_error(request, "400 Bad Request", "Ungueltige WLAN-Reihenfolge.");
+    }
+    esp_err_t err = app_wifi_profiles_move(ssid, direction);
+    if (err == ESP_ERR_NOT_FOUND) {
+        return send_provision_error(request, "404 Not Found", "WLAN nicht gefunden.");
+    }
+    if (err == ESP_ERR_INVALID_STATE) {
+        return send_provision_error(request, "409 Conflict", "WLAN kann nicht weiter verschoben werden.");
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "WLAN-Reihenfolge konnte nicht gespeichert werden: %s",
+                 esp_err_to_name(err));
+        return send_provision_error(request, "500 Internal Server Error",
+                                    "WLAN-Reihenfolge konnte nicht gespeichert werden.");
+    }
+    httpd_resp_set_type(request, "text/plain; charset=utf-8");
+    return httpd_resp_sendstr(request, "WLAN-Reihenfolge gespeichert. Gilt ab dem naechsten Neustart.");
+}
+
 static esp_err_t status_wifi_delete_handler(httpd_req_t *request)
 {
     char body[128];
@@ -1013,13 +1069,8 @@ static cJSON *fetch_jenkins_job_level_once(const char *parent_url, size_t first_
         return NULL;
     }
 
-    int64_t request_start_us = esp_timer_get_time();
-    ESP_LOGI(HTTP_TAG, "GET /api/jobs: Jenkins-Ebene wird geladen");
     esp_err_t err = esp_http_client_perform(client);
     int status_code = esp_http_client_get_status_code(client);
-    ESP_LOGI(HTTP_TAG, "GET /api/jobs: Jenkins-Ebene nach %lld ms geladen (%s, HTTP %d)",
-             (long long) ((esp_timer_get_time() - request_start_us) / 1000),
-             esp_err_to_name(err), status_code);
     esp_http_client_cleanup(client);
     if (err != ESP_OK || status_code < 200 || status_code >= 300 || response.body == NULL) {
         ESP_LOGE(TAG, "Jobliste konnte nicht geladen werden: %s (HTTP %d)",
@@ -1050,8 +1101,6 @@ static cJSON *fetch_jenkins_job_level(const char *parent_url, size_t first_job)
         return jenkins_json;
     }
 
-    ESP_LOGW(TAG, "Jenkins-Jobliste: erneuter Versuch in %u ms",
-             JENKINS_JOB_RETRY_DELAY_MS);
     vTaskDelay(pdMS_TO_TICKS(JENKINS_JOB_RETRY_DELAY_MS));
     return fetch_jenkins_job_level_once(parent_url, first_job, &retryable);
 }
@@ -1168,7 +1217,6 @@ static esp_err_t status_jobs_handler(httpd_req_t *request)
     const char *parent_name = "";
     int folder_index = 0;
     for (;;) {
-        size_t level_job_count = 0;
         for (size_t first_job = 0;; first_job += JENKINS_JOB_PAGE_SIZE) {
             cJSON *jenkins_json = fetch_jenkins_job_level(parent_url, first_job);
             if (jenkins_json == NULL) {
@@ -1179,7 +1227,6 @@ static esp_err_t status_jobs_handler(httpd_req_t *request)
             }
             const cJSON *jenkins_jobs = cJSON_GetObjectItemCaseSensitive(jenkins_json, "jobs");
             int job_count = cJSON_GetArraySize(jenkins_jobs);
-            level_job_count += (size_t) job_count;
             bool appended = append_jenkins_job_level(result_jobs, folders,
                                                       jenkins_jobs, parent_name);
             cJSON_Delete(jenkins_json);
@@ -1193,8 +1240,6 @@ static esp_err_t status_jobs_handler(httpd_req_t *request)
                 break;
             }
         }
-        ESP_LOGI(HTTP_TAG, "GET /api/jobs: %lu Eintraege in einer Jenkins-Ebene",
-                 (unsigned long) level_job_count);
         cJSON *next_folder = cJSON_GetArrayItem(folders, folder_index++);
         if (next_folder == NULL) {
             break;
@@ -1214,8 +1259,6 @@ static esp_err_t status_jobs_handler(httpd_req_t *request)
     httpd_resp_set_type(request, "application/json; charset=utf-8");
     esp_err_t send_err = httpd_resp_send(request, result_text, HTTPD_RESP_USE_STRLEN);
     free(result_text);
-    ESP_LOGI(HTTP_TAG, "GET /api/jobs: Stackreserve der HTTP-Task %lu B",
-             (unsigned long) uxTaskGetStackHighWaterMark(NULL));
     return send_err;
 }
 
@@ -1592,8 +1635,6 @@ static esp_err_t status_manual_light_handler(httpd_req_t *request)
     bool light_enabled = cJSON_IsTrue(enabled);
     cJSON_Delete(json);
 
-    ESP_LOGI(HTTP_TAG, "POST /api/light: %s %s", light_label,
-             light_enabled ? "ein" : "aus");
     s_manual_light_handler(light, light_enabled);
     char response[48];
     snprintf(response, sizeof(response), "%s ist jetzt %s.", light_label,
@@ -1655,8 +1696,6 @@ static esp_err_t status_manual_light_color_handler(httpd_req_t *request)
         return send_status_error(request, "400 Bad Request", "Ungültige LED-Farbe.");
     }
 
-    ESP_LOGI(HTTP_TAG, "POST /api/light-color: %s #%02x%02x%02x", light_label,
-             red, green, blue);
     traffic_light_set_manual_color(light, red, green, blue);
     char response[64];
     snprintf(response, sizeof(response), "Farbe für %s gesetzt.", light_label);
@@ -1666,7 +1705,6 @@ static esp_err_t status_manual_light_color_handler(httpd_req_t *request)
 
 static esp_err_t status_manual_lights_state_handler(httpd_req_t *request)
 {
-    ESP_LOGI(HTTP_TAG, "GET /api/lights");
     if (s_manual_light_state_handler == NULL || s_control_mode_state_handler == NULL) {
         return send_status_error(request, "503 Service Unavailable",
                                  "Manuelle Ampelsteuerung ist nicht verfügbar.");
@@ -1721,7 +1759,6 @@ static esp_err_t status_manual_lights_state_handler(httpd_req_t *request)
     httpd_resp_set_type(request, "application/json; charset=utf-8");
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     esp_err_t err = httpd_resp_send(request, response, response_length);
-    ESP_LOGI(HTTP_TAG, "GET /api/lights abgeschlossen: %s", esp_err_to_name(err));
     return err;
 }
 
@@ -1873,6 +1910,70 @@ static esp_err_t status_brightness_handler(httpd_req_t *request)
     return httpd_resp_sendstr(request, response);
 }
 
+static esp_err_t status_cpu_mode_get_handler(httpd_req_t *request)
+{
+    char response[48];
+    snprintf(response, sizeof(response), "{\"mode\":\"%s\"}",
+             app_cpu_mode_name(app_cpu_current_mode()));
+    httpd_resp_set_type(request, "application/json; charset=utf-8");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    return httpd_resp_sendstr(request, response);
+}
+
+static esp_err_t status_cpu_mode_post_handler(httpd_req_t *request)
+{
+    if (request->content_len <= 0 || request->content_len >= STATUS_REQUEST_MAX_LENGTH) {
+        return send_status_error(request, "400 Bad Request", "Ungueltiger CPU-Modus.");
+    }
+    char request_body[STATUS_REQUEST_MAX_LENGTH];
+    int received = 0;
+    while (received < request->content_len) {
+        int result = httpd_req_recv(request, request_body + received,
+                                    request->content_len - received);
+        if (result == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if (result <= 0) {
+            return send_status_error(request, "400 Bad Request",
+                                     "CPU-Modus konnte nicht gelesen werden.");
+        }
+        received += result;
+    }
+    request_body[received] = '\0';
+
+    cJSON *json = cJSON_Parse(request_body);
+    cJSON *mode_name = json == NULL ? NULL : cJSON_GetObjectItemCaseSensitive(json, "mode");
+    app_cpu_mode_t mode;
+    bool valid = cJSON_IsString(mode_name) &&
+                 app_cpu_mode_from_name(mode_name->valuestring, &mode);
+    cJSON_Delete(json);
+    if (!valid) {
+        return send_status_error(request, "400 Bad Request", "Ungueltiger CPU-Modus.");
+    }
+
+    app_cpu_mode_t previous = app_cpu_current_mode();
+    esp_err_t err = app_cpu_apply_mode(mode);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "CPU-Modus konnte nicht aktiviert werden: %s", esp_err_to_name(err));
+        return send_status_error(request, "500 Internal Server Error",
+                                 "CPU-Modus konnte nicht aktiviert werden.");
+    }
+    err = app_config_save_cpu_mode(mode);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "CPU-Modus konnte nicht gespeichert werden: %s", esp_err_to_name(err));
+        esp_err_t rollback_err = app_cpu_apply_mode(previous);
+        if (rollback_err != ESP_OK) {
+            ESP_LOGE(TAG, "Vorheriger CPU-Modus konnte nicht wiederhergestellt werden: %s",
+                     esp_err_to_name(rollback_err));
+        }
+        return send_status_error(request, "500 Internal Server Error",
+                                 "CPU-Modus konnte nicht gespeichert werden.");
+    }
+    s_status_config.cpu_mode = mode;
+    httpd_resp_set_type(request, "text/plain; charset=utf-8");
+    return httpd_resp_sendstr(request, "CPU-Modus gespeichert.");
+}
+
 static esp_err_t status_control_mode_handler(httpd_req_t *request)
 {
     if (s_control_mode_handler == NULL) {
@@ -1913,11 +2014,7 @@ static esp_err_t status_control_mode_handler(httpd_req_t *request)
     }
 
     cJSON_Delete(json);
-    ESP_LOGI(HTTP_TAG, "POST /api/mode: %s", control_mode_name(mode));
-    int64_t mode_start_us = esp_timer_get_time();
     s_control_mode_handler(mode);
-    ESP_LOGI(HTTP_TAG, "POST /api/mode nach %lld ms angewendet",
-             (long long) ((esp_timer_get_time() - mode_start_us) / 1000));
     httpd_resp_set_type(request, "text/plain; charset=utf-8");
     if (mode == APP_CONTROL_MODE_AUTO) {
         return httpd_resp_sendstr(request, "Jenkins-Betriebsart ist aktiv.");
@@ -1982,7 +2079,6 @@ static esp_err_t status_api_status_handler(httpd_req_t *request)
                                  "Status muss off, red, yellow oder green sein.");
     }
 
-    ESP_LOGI(HTTP_TAG, "POST /api/status: %s", status_name->valuestring);
     cJSON_Delete(json);
     s_api_status_handler(status);
     httpd_resp_set_type(request, "application/json; charset=utf-8");
@@ -2059,6 +2155,8 @@ static esp_err_t status_device_info_handler(httpd_req_t *request)
         cJSON_AddNumberToObject(info, "chip_revision_minor", chip_info.revision % 100) == NULL ||
         cJSON_AddNumberToObject(info, "cores", chip_info.cores) == NULL ||
         cJSON_AddNumberToObject(info, "cpu_hz", cpu_hz) == NULL ||
+        cJSON_AddStringToObject(info, "cpu_mode",
+                                app_cpu_mode_name(app_cpu_current_mode())) == NULL ||
         cJSON_AddNumberToObject(info, "cpu_max_hz",
                                 chip_info.model == CHIP_ESP32S3 ? 240000000 : 0) == NULL ||
         cJSON_AddNumberToObject(info, "apb_hz", apb_hz) == NULL ||
@@ -2102,8 +2200,7 @@ static esp_err_t status_device_info_handler(httpd_req_t *request)
 
 static esp_err_t status_page_handler(httpd_req_t *request)
 {
-    int64_t request_start_us = esp_timer_get_time();
-    ESP_LOGI(HTTP_TAG, "GET / startet");
+    bool boosted = app_cpu_boost_begin();
     static const char page[] =
         "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
@@ -2117,7 +2214,7 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "label{display:block;margin-top:1rem;font-weight:700}input,select{width:100%;margin-top:.4rem;border:1px solid #b8c9d6;border-radius:.7rem;padding:.85rem;font:inherit;background:#fff}input:focus,select:focus{outline:3px solid #b9d7fa;border-color:var(--blue)}"
         "button{min-height:2.8rem;border:0;border-radius:.7rem;background:var(--navy);color:#fff;padding:.75rem 1rem;font:700 .96rem inherit;box-shadow:0 .35rem .8rem rgba(31,41,55,.18)}button:active{transform:translateY(1px)}button:disabled{cursor:not-allowed;opacity:.48}form button{width:100%;margin-top:1.4rem}"
         ".job-picker{display:flex;align-items:flex-end;gap:.55rem}.job-picker label{flex:1;min-width:0}.job-refresh{display:grid;place-items:center;flex:0 0 2.9rem;width:2.9rem;height:2.9rem;min-height:0;margin:0 0 .05rem;padding:0;border:1px solid #b8d7fa;background:#e8f1f8;color:var(--navy);box-shadow:none;cursor:pointer}.job-refresh:hover{background:#d6e9fb}.job-refresh:focus-visible{outline:3px solid var(--blue);outline-offset:2px}.job-refresh svg{width:1.25rem;height:1.25rem;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.job-list-note{margin:.65rem 0 0;color:var(--muted);font-size:.85rem}"
-        ".wifi-settings{margin-top:2rem;padding-top:1.4rem;border-top:1px solid #dbe7ef}.wifi-settings h2{margin-bottom:.35rem}.wifi-name-field{position:relative}.wifi-name-field input{padding-right:3.2rem}.wifi-name-field button{position:absolute;right:.3rem;bottom:.3rem;width:2.45rem;min-height:0;margin:0;padding:.45rem;border-radius:.5rem;font-size:1.35rem;line-height:1}.saved-wifi{display:grid;gap:.45rem;margin-top:1rem}.wifi-entry{display:flex;align-items:center;justify-content:space-between;gap:.7rem;padding:.6rem .75rem;border:1px solid #dbe7ef;border-radius:.65rem;background:#f5f9fc}.wifi-entry span{min-width:0;overflow-wrap:anywhere}.wifi-entry button{min-height:2rem;flex:0 0 auto;padding:.35rem .6rem;background:#a11227;font-size:.8rem}"
+        ".wifi-settings{margin-top:2rem;padding-top:1.4rem;border-top:1px solid #dbe7ef}.wifi-settings h2{margin-bottom:.35rem}.wifi-name-field{position:relative}.wifi-name-field input{padding-right:3.2rem}.wifi-name-field button{position:absolute;right:.3rem;bottom:.3rem;width:2.45rem;min-height:0;margin:0;padding:.45rem;border-radius:.5rem;font-size:1.35rem;line-height:1}.saved-wifi{display:grid;gap:.45rem;margin-top:1rem}.wifi-entry{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.7rem;padding:.6rem .75rem;border:1px solid #dbe7ef;border-radius:.65rem;background:#f5f9fc}.wifi-entry span{min-width:0;overflow-wrap:anywhere}.wifi-actions{display:flex;align-items:center;gap:.3rem}.wifi-entry button{min-height:2.4rem;flex:0 0 auto;padding:.35rem .55rem;background:#a11227;font-size:.8rem}.wifi-entry button[data-direction]{min-width:2.4rem;background:#e8f1f8;color:var(--navy);font-size:1.15rem}"
         ".site-title-row{padding:0}.site-title-row button,.site-title-row input{display:block;width:100%;min-height:0;margin:0;padding:.7rem 1rem;border:0;border-radius:1rem;background:transparent;color:inherit;font:inherit;line-height:inherit;text-align:center;box-shadow:none}.site-title-row button{cursor:text}.site-title-row button:hover{background:#e8f1f8}.site-title-row button:disabled{opacity:1;cursor:wait}.site-title-row button:focus-visible,.site-title-row input:focus{outline:3px solid var(--blue);outline-offset:-3px}.site-title-row button[hidden],.site-title-row input[hidden]{display:none}"
         ".branding-settings{margin-top:2rem;padding-top:1.4rem;border-top:1px solid #dbe7ef}.branding-item{margin-top:1rem;padding:1rem;border:1px solid #dbe7ef;border-radius:.75rem;background:#f5f9fc}.branding-item label{margin-top:0}.branding-item .hint{margin:.55rem 0 0}"
         ".tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.25rem;max-width:100%%;margin:1rem 0 0;padding:0 .75rem;border-bottom:1px solid #dbe7ef;position:relative;z-index:1}.tabs a{min-width:0;margin:0 0 -1px;padding:.7rem .45rem;border:1px solid transparent;border-bottom:0;border-radius:.75rem .75rem 0 0;color:var(--muted);font-size:.9rem;font-weight:750;line-height:1.2;text-align:center;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tabs a[aria-selected=\"true\"]{border-color:#dbe7ef;border-bottom:1px solid #fff;background:#fff;color:var(--navy);box-shadow:0 -.15rem .5rem rgba(31,41,55,.07)}.tabs a:focus-visible{outline:3px solid #b9d7fa;outline-offset:-3px}.tab{display:none}.tab.active{display:block}"
@@ -2127,7 +2224,7 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "#toast{position:fixed;z-index:10;top:1rem;right:1rem;width:min(calc(100vw - 2rem),28rem);padding:1rem 1.25rem;border-radius:.85rem;background:#357b12;color:#fff;font-weight:750;line-height:1.4;text-align:center;box-shadow:0 1rem 2.5rem rgba(16,42,67,.3);opacity:0;pointer-events:none;transform:translateY(-.5rem);transition:opacity .2s ease,transform .2s ease}#toast.show{opacity:1;transform:translateY(0)}"
         "#job-loading,#jenkins-loading{position:fixed;z-index:20;inset:0;display:none;align-items:center;justify-content:center;padding:1rem;background:rgba(16,42,67,.42)}#job-loading.show,#jenkins-loading.show{display:flex}.job-loading-card{display:flex;align-items:center;gap:.8rem;padding:1rem 1.25rem;border-radius:.85rem;background:#fff;color:var(--navy);font-weight:750;box-shadow:0 1rem 2.5rem rgba(16,42,67,.3)}.spinner{width:1.7rem;height:1.7rem;flex:0 0 auto;border:.25rem solid #c8d9e8;border-top-color:var(--blue);border-radius:50%;animation:job-spin .8s linear infinite}@keyframes job-spin{to{transform:rotate(360deg)}}"
         ".login-overlay{position:fixed;z-index:100;inset:0;display:flex;align-items:center;justify-content:center;padding:1rem;background:rgba(16,42,67,.55);backdrop-filter:blur(4px)}.login-overlay[hidden]{display:none}.login-card{width:min(100%,27rem);padding:clamp(1.5rem,5vw,2.25rem);border:1px solid #dbe7ef;border-radius:1.25rem;background:#fff;box-shadow:0 1.5rem 3rem rgba(0,32,65,.28)}.login-card h2{margin:.35rem 0 .4rem;font-size:1.6rem}.login-card .hint{margin:0}.login-card button{margin-top:1.25rem}.login-error{min-height:1.3rem;margin:.8rem 0 0;color:#a11227;font-size:.9rem;font-weight:700}"
-        "@media(max-width:430px){.page{padding:.75rem}.card{padding:1.1rem;border-radius:0 0 1rem 1rem}.tabs{padding:0 .4rem}.tabs a{padding:.65rem .3rem;font-size:.78rem}.portal-layout{grid-template-columns:minmax(0,1fr) 3.3rem;gap:.75rem}.manual-controls{grid-template-columns:1fr}}</style></head><body>"
+        "@media(max-width:430px){.page{padding:.75rem}.card{padding:1.1rem;border-radius:0 0 1rem 1rem}.tabs{padding:0 .4rem}.tabs a{padding:.65rem .3rem;font-size:.78rem}.portal-layout{grid-template-columns:minmax(0,1fr) 3.3rem;gap:.75rem}.manual-controls{grid-template-columns:1fr}}.ota-settings{margin-top:1.5rem;border-top:1px solid #dbe7ef;border-radius:1.25rem}.ota-actions{display:flex;flex-wrap:wrap;gap:.65rem}.ota-settings progress{width:100%;margin-top:1rem}.ota-settings [data-error=\"true\"]{color:#a11227}</style></head><body>"
         "<div id=\"login-overlay\" class=\"login-overlay\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"login-title\"><form id=\"login-form\" class=\"login-card\"><p class=\"eyebrow\">CI-Lights</p><h2 id=\"login-title\">Verwaltung anmelden</h2><p class=\"hint\">Melde dich mit dem Benutzernamen und Passwort aus der Einrichtung an.</p><label>Benutzername<input id=\"login-username\" name=\"username\" autocomplete=\"username\" required maxlength=\"32\" autofocus></label><label>Passwort<input id=\"login-password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" required></label><p id=\"login-error\" class=\"login-error\" role=\"alert\"></p><button type=\"submit\">Anmelden</button></form></div>"
         "<main id=\"dashboard\" class=\"page\" inert aria-hidden=\"true\">" LANGUAGE_SWITCH_HTML
         "<form id=\"banner-form\" class=\"brand\" data-branding=\"logo\"><img src=\"/logo.svg\" alt=\"Banner\" onload=\"this.parentElement.classList.add('has-banner')\" onerror=\"this.parentElement.classList.remove('has-banner')\"><input id=\"banner-file\" type=\"file\" accept=\".svg,image/svg+xml,.png,image/png\" required hidden><button class=\"banner-upload\" type=\"button\" title=\"Banner hochladen (SVG oder PNG, maximal 32 KiB)\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 16V3m0 0L7 8m5-5 5 5M4 16v4h16v-4\"/></svg><span>Banner hochladen</span></button></form>"
@@ -2144,10 +2241,11 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "<p class=\"hint\">Der Jenkins-Status wird in diesem Abstand aktualisiert. Erlaubt sind ganze Minuten ab 1.</p>"
         "<form id=\"poll-interval-form\"><label>Abfrageintervall in Minuten<input id=\"poll-interval\" name=\"poll_interval_minutes\" type=\"number\" min=\"1\" step=\"1\" inputmode=\"numeric\" required></label>"
         "<button type=\"submit\">Intervall speichern</button></form></section>"
-        "<section class=\"wifi-settings\"><h2>Gespeicherte WLANs</h2><p class=\"hint\">Bis zu acht WLANs. Bei voller Liste ersetzt ein neues WLAN das am längsten nicht neu gespeicherte Profil. Beim Start wird zuerst das zuletzt verwendete versucht, danach die anderen. Ist keines erreichbar, startet die WLAN-Einrichtung.</p><div id=\"saved-wifi\" class=\"saved-wifi\"></div>"
+        "<section class=\"wifi-settings\"><h2>Gespeicherte WLANs</h2><p class=\"hint\">Beim Start versucht die Ampel die WLANs von oben nach unten und bleibt beim ersten erreichbaren. Mit den Pfeilen änderst du die Reihenfolge; sie gilt ab dem nächsten Neustart. Neue WLANs kommen ans Ende. Bei voller Liste ersetzt ein neues WLAN das letzte Profil. Ist keines erreichbar, startet die WLAN-Einrichtung.</p><p class=\"hint\">Handy-Hotspot und IoT-WLAN: Hotspot nach oben setzen. Zum Verwalten Hotspot einschalten und die Ampel neu starten. Danach Hotspot ausschalten und die Ampel erneut starten, damit sie ins IoT-WLAN wechselt.</p><div id=\"saved-wifi\" class=\"saved-wifi\"></div>"
         "<form id=\"wifi-form\"><label>WLAN-Name<div class=\"wifi-name-field\"><input id=\"wifi-ssid\" name=\"wifi_ssid\" list=\"wifi-networks\" placeholder=\"WLAN auswählen oder eingeben\" required maxlength=\"32\"><button id=\"wifi-refresh\" type=\"button\" aria-label=\"WLANs aktualisieren\" title=\"WLANs aktualisieren\">&#x21bb;</button></div><datalist id=\"wifi-networks\"></datalist></label>"
         "<label>WLAN-Benutzername (nur WPA2-Enterprise)<input name=\"wifi_username\" maxlength=\"127\"></label><label>WLAN-Passwort (bei offenen WLANs leer lassen)<input name=\"wifi_password\" type=\"password\" maxlength=\"63\"></label>"
         "<p class=\"hint\">Bei geschützten WLANs das Passwort erneut eingeben. Ein bereits gespeicherter WLAN-Name wird aktualisiert.</p><button type=\"submit\">WLAN speichern und neu starten</button></form><p id=\"wifi-scan-status\" class=\"hint\" role=\"status\"></p></section>"
+        "<section class=\"poll-settings\"><h2>CPU-Takt</h2><p class=\"hint\">Automatisch: im Leerlauf bis 40 MHz, bei WLAN-, Jenkins- und Verwaltungsanfragen bis zur gewählten Obergrenze. Ein Wechsel wirkt sofort und bleibt gespeichert.</p><label>CPU-Modus<select id=\"cpu-mode\"><option value=\"fixed160\">Fest 160 MHz</option><option value=\"auto160\">Automatisch 40–160 MHz</option><option value=\"auto240\">Automatisch 40–240 MHz</option><option value=\"fixed240\">Fest 240 MHz</option></select></label></section>"
         "<section class=\"branding-settings\"><h2>Branding</h2><p class=\"hint\">Das Banner oben kannst du direkt anklicken und hochladen. Das Favicon wird hier hochgeladen. Beide Dateien bleiben nach einem Neustart im Flash gespeichert.</p><form class=\"branding-item\" data-branding=\"favicon\"><label>Favicon (ICO oder PNG, maximal 32 KiB)<input type=\"file\" accept=\".ico,image/x-icon,image/vnd.microsoft.icon,.png,image/png\" required></label><p class=\"hint\" data-branding-state=\"favicon\" role=\"status\">Noch nicht hochgeladen</p><button type=\"submit\">Favicon hochladen</button></form></section></section>"
         "<section id=\"tab-manual\" class=\"tab\" role=\"tabpanel\"><h2>Ampelsteuerung</h2>"
         "<p class=\"hint\">Wähle, wer die Ampel steuert. Manuell und API setzen Jenkins vollständig aus.</p>"
@@ -2158,30 +2256,32 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "<section id=\"tab-job\" class=\"tab active\" role=\"tabpanel\"><h2>Jenkins-Job</h2>"
         "<p>Wähle den Job, dessen Status die Ampel anzeigen soll.</p>"
         "<form id=\"job-form\"><div class=\"job-picker\"><label>Jenkins-Job<select id=\"job\" required disabled></select></label><button id=\"refresh-jobs\" class=\"job-refresh\" type=\"button\" aria-label=\"Jobliste aktualisieren\" title=\"Jobliste aktualisieren\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M20 11a8 8 0 1 0-2.3 6.7M20 4v7h-7\"/></svg></button></div><p id=\"job-list-note\" class=\"job-list-note\" role=\"status\">Liste noch nicht geladen.</p>"
-        "<button id=\"show-job\" type=\"submit\" disabled>Job anzeigen</button></form></section></div></div></section><details id=\"board-details\" class=\"device-footer\"><summary>Mikrocontroller</summary><div id=\"device-info\" class=\"device-info\"><p class=\"device-message\">Gerätedaten werden geladen ...</p></div></details></main><div id=\"toast\" role=\"status\" aria-live=\"polite\"></div><div id=\"job-loading\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Jobliste wird geladen\" aria-hidden=\"true\"><div class=\"job-loading-card\"><span class=\"spinner\" aria-hidden=\"true\"></span><span>Jobliste wird geladen ...</span></div></div><div id=\"jenkins-loading\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Jenkins-Status wird abgefragt\" aria-hidden=\"true\"><div class=\"job-loading-card\"><span class=\"spinner\" aria-hidden=\"true\"></span><span>Jenkins-Status wird abgefragt ...</span></div></div>"
-        "<script src=\"/localization.js\"></script><script>const loginOverlay=document.querySelector('#login-overlay'),loginForm=document.querySelector('#login-form'),loginUsername=document.querySelector('#login-username'),loginPassword=document.querySelector('#login-password'),loginError=document.querySelector('#login-error'),dashboard=document.querySelector('#dashboard'),nativeFetch=window.fetch.bind(window);let adminAuthorization='',dashboardStarted=false;"
+        "<button id=\"show-job\" type=\"submit\" disabled>Job anzeigen</button></form></section></div></div></section><section class=\"card ota-settings\" aria-labelledby=\"ota-title\"><h2 id=\"ota-title\">Firmware-Updates</h2><p class=\"hint\">Installiere eine neue Firmware direkt ueber WLAN. Die Ampel startet danach neu.</p><p>Installiert: <strong id=\"ota-current\">?</strong> | Verfuegbar: <strong id=\"ota-latest\">?</strong></p><div class=\"ota-actions\"><button id=\"ota-check\" type=\"button\" disabled>Nach Updates suchen</button><button id=\"ota-install\" type=\"button\" hidden disabled>Update installieren</button></div><progress id=\"ota-progress\" max=\"100\" value=\"0\" hidden aria-label=\"Update-Fortschritt\"></progress><p id=\"ota-message\" class=\"hint\" role=\"status\">Noch nicht nach Updates gesucht.</p></section><details id=\"board-details\" class=\"device-footer\"><summary>Mikrocontroller</summary><div id=\"device-info\" class=\"device-info\"><p class=\"device-message\">Gerätedaten werden geladen ...</p></div></details></main><div id=\"toast\" role=\"status\" aria-live=\"polite\"></div><div id=\"job-loading\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Jobliste wird geladen\" aria-hidden=\"true\"><div class=\"job-loading-card\"><span class=\"spinner\" aria-hidden=\"true\"></span><span>Jobliste wird geladen ...</span></div></div><div id=\"jenkins-loading\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Jenkins-Status wird abgefragt\" aria-hidden=\"true\"><div class=\"job-loading-card\"><span class=\"spinner\" aria-hidden=\"true\"></span><span>Jenkins-Status wird abgefragt ...</span></div></div>"
+        "<script src=\"/localization.js\"></script><script src=\"/ota.js\"></script><script>const loginOverlay=document.querySelector('#login-overlay'),loginForm=document.querySelector('#login-form'),loginUsername=document.querySelector('#login-username'),loginPassword=document.querySelector('#login-password'),loginError=document.querySelector('#login-error'),dashboard=document.querySelector('#dashboard'),nativeFetch=window.fetch.bind(window);let adminAuthorization='',dashboardStarted=false;"
         "function showLogin(){adminAuthorization='';dashboard.inert=true;dashboard.setAttribute('aria-hidden','true');loginOverlay.hidden=false;loginPassword.value='';loginUsername.focus()}"
         "window.fetch=(input,options={})=>{if(typeof input!=='string'||!input.startsWith('/api/')||input==='/api/login')return nativeFetch(input,options);if(!adminAuthorization)return Promise.reject(new Error('Bitte anmelden.'));const headers=new Headers(options.headers);headers.set('Authorization',adminAuthorization);headers.set('X-Admin-UI','1');return nativeFetch(input,{...options,headers}).then(response=>{if(response.status===401){showLogin();throw new Error('Bitte erneut anmelden.')}return response})};"
         "loginForm.addEventListener('submit',async event=>{event.preventDefault();const username=loginUsername.value.trim(),password=loginPassword.value,button=loginForm.querySelector('button');button.disabled=true;loginError.textContent='';try{const response=await nativeFetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});if(!response.ok)throw new Error(await response.text());const bytes=new TextEncoder().encode(username+':'+password);adminAuthorization='Basic '+btoa(String.fromCharCode(...bytes));loginPassword.value='';loginOverlay.hidden=true;dashboard.inert=false;dashboard.setAttribute('aria-hidden','false');if(!dashboardStarted)startDashboard();else refreshDashboard()}catch(error){loginError.textContent=error.message}finally{button.disabled=false}});loginUsername.focus();"
-        "const select=document.querySelector('#job'),refreshJobs=document.querySelector('#refresh-jobs'),showJob=document.querySelector('#show-job'),jobListNote=document.querySelector('#job-list-note'),status=document.querySelector('#status'),pollInterval=document.querySelector('#poll-interval'),controlMode=document.querySelector('#control-mode'),modeHint=document.querySelector('#mode-hint'),buildEffect=document.querySelector('#build-effect'),discoControls=document.querySelector('#disco-controls'),discoEffect=document.querySelector('#disco-effect'),brightness=document.querySelector('#brightness'),brightnessValue=document.querySelector('#brightness-value'),toast=document.querySelector('#toast'),jobLoading=document.querySelector('#job-loading'),jenkinsLoading=document.querySelector('#jenkins-loading');"
-        "const wifiForm=document.querySelector('#wifi-form'),wifiSsid=document.querySelector('#wifi-ssid'),wifiNetworks=document.querySelector('#wifi-networks'),wifiRefresh=document.querySelector('#wifi-refresh'),wifiScanStatus=document.querySelector('#wifi-scan-status'),savedWifi=document.querySelector('#saved-wifi');let wifiData=null,wifiTabLoaded=false,wifiTabLoading=false,wifiScanSource='';"
+        "const select=document.querySelector('#job'),refreshJobs=document.querySelector('#refresh-jobs'),showJob=document.querySelector('#show-job'),jobListNote=document.querySelector('#job-list-note'),status=document.querySelector('#status'),pollInterval=document.querySelector('#poll-interval'),cpuMode=document.querySelector('#cpu-mode'),controlMode=document.querySelector('#control-mode'),modeHint=document.querySelector('#mode-hint'),buildEffect=document.querySelector('#build-effect'),discoControls=document.querySelector('#disco-controls'),discoEffect=document.querySelector('#disco-effect'),brightness=document.querySelector('#brightness'),brightnessValue=document.querySelector('#brightness-value'),toast=document.querySelector('#toast'),jobLoading=document.querySelector('#job-loading'),jenkinsLoading=document.querySelector('#jenkins-loading');"
+        "const wifiForm=document.querySelector('#wifi-form'),wifiSsid=document.querySelector('#wifi-ssid'),wifiNetworks=document.querySelector('#wifi-networks'),wifiRefresh=document.querySelector('#wifi-refresh'),wifiScanStatus=document.querySelector('#wifi-scan-status'),savedWifi=document.querySelector('#saved-wifi');let wifiData=null,wifiTabLoaded=false,wifiTabLoading=false,wifiScanSource='',wifiOrderPending=false;"
         "const brandingForms=[...document.querySelectorAll('[data-branding]')];let brandingData=null;"
         "const siteTitleHeading=document.querySelector('#site-title'),siteTitleButton=document.querySelector('#site-title-edit'),siteTitleInput=document.querySelector('#site-title-input');let savedSiteTitle='CI-Lights';"
         "let statusSource='';function showStatus(message,isError=false){statusSource=message;status.textContent=message.startsWith('Fehler: ')?uiI18n.t('Fehler: ')+uiI18n.response(message.slice(8)):uiI18n.response(message);status.dataset.error=isError?'true':'false'}"
         "function showWifiScanStatus(message){wifiScanSource=message;wifiScanStatus.textContent=message.startsWith('Fehler: ')?uiI18n.t('Fehler: ')+uiI18n.response(message.slice(8)):uiI18n.response(message)}"
-        "function renderSavedWifi(){if(!wifiData)return;savedWifi.replaceChildren(...wifiData.networks.map(network=>{const row=document.createElement('div'),label=document.createElement('span'),remove=document.createElement('button');row.className='wifi-entry';const tags=[];if(network.ssid===wifiData.connected_ssid)tags.push(uiI18n.t('Verbunden'));if(network.last_used)tags.push(uiI18n.t('Zuletzt verwendet'));label.textContent=network.ssid+(tags.length?' ('+tags.join(', ')+')':'');remove.type='button';remove.textContent=uiI18n.t('Entfernen');remove.disabled=wifiData.networks.length===1;remove.addEventListener('click',async()=>{remove.disabled=true;try{const r=await fetch('/api/wifi',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:network.ssid})});if(await showSaveResult(r))await loadSavedWifi();else remove.disabled=false}catch(error){showStatus('Fehler: '+error.message,true);remove.disabled=false}});row.append(label,remove);return row}))}"
+        "function renderSavedWifi(){if(!wifiData)return;savedWifi.replaceChildren(...wifiData.networks.map((network,index)=>{const row=document.createElement('div'),label=document.createElement('span'),actions=document.createElement('div'),remove=document.createElement('button');row.className='wifi-entry';actions.className='wifi-actions';const tags=[];if(network.ssid===wifiData.connected_ssid)tags.push(uiI18n.t('Verbunden'));if(network.last_used)tags.push(uiI18n.t('Zuletzt verwendet'));label.textContent=(index+1)+'. '+network.ssid+(tags.length?' ('+tags.join(', ')+')':'');for(const [direction,symbol,disabled] of [['up','↑',index===0],['down','↓',index===wifiData.networks.length-1]]){const button=document.createElement('button');button.type='button';button.dataset.direction=direction;button.textContent=symbol;button.title=uiI18n.t(direction==='up'?'Nach oben':'Nach unten');button.setAttribute('aria-label',button.title+': '+network.ssid);button.disabled=disabled||wifiOrderPending;button.addEventListener('click',()=>moveSavedWifi(network.ssid,direction));actions.append(button)}remove.type='button';remove.textContent=uiI18n.t('Entfernen');remove.disabled=wifiData.networks.length===1||wifiOrderPending;remove.addEventListener('click',async()=>{remove.disabled=true;try{const r=await fetch('/api/wifi',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:network.ssid})});if(await showSaveResult(r))await loadSavedWifi();else remove.disabled=false}catch(error){showStatus('Fehler: '+error.message,true);remove.disabled=false}});actions.append(remove);row.append(label,actions);return row}))}"
+        "async function moveSavedWifi(ssid,direction){if(wifiOrderPending)return;wifiOrderPending=true;renderSavedWifi();try{const r=await fetch('/api/wifi/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid,direction})});if(await showSaveResult(r))await loadSavedWifi()}catch(error){showStatus('Fehler: '+error.message,true)}finally{wifiOrderPending=false;renderSavedWifi()}}"
         "async function loadSavedWifi(){const r=await fetch('/api/wifi',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());wifiData=await r.json();if(!wifiTabLoaded)wifiSsid.value=wifiData.connected_ssid;renderSavedWifi()}"
         "async function loadWifiNetworks(){if(wifiRefresh.disabled)return;wifiRefresh.disabled=true;wifiNetworks.replaceChildren();showWifiScanStatus('Suche nach WLANs ...');try{const r=await fetch('/api/wifi-networks');if(!r.ok)throw new Error(await r.text());const data=await r.json();for(const name of data.networks)wifiNetworks.append(new Option(name,name));showWifiScanStatus(data.networks.length?'':'Keine WLANs gefunden. Du kannst den Namen auch manuell eingeben.')}finally{wifiRefresh.disabled=false}}"
         "function renderBranding(){if(!brandingData)return;const item=brandingData.favicon,state=document.querySelector('[data-branding-state=favicon]');state.textContent=item.uploaded?uiI18n.t('Gespeichert')+' ('+item.format.toUpperCase()+', '+Math.ceil(item.bytes/1024)+' KiB)':uiI18n.t('Noch nicht hochgeladen')}"
         "async function loadSiteTitle(){const r=await fetch('/api/site-title',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());const data=await r.json();savedSiteTitle=data.title;siteTitleHeading.textContent=data.title;if(siteTitleInput.hidden)siteTitleInput.value=data.title;document.title=data.title}"
         "async function loadBranding(){const r=await fetch('/api/branding',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());brandingData=await r.json();renderBranding()}"
+        "let savedCpuMode='fixed160';async function loadCpuMode(){const r=await fetch('/api/cpu-mode',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());const data=await r.json();savedCpuMode=data.mode;cpuMode.value=data.mode}"
         "async function uploadBranding(event){event.preventDefault();const form=event.target,kind=form.dataset.branding,input=form.querySelector('input'),file=input.files[0],button=form.querySelector('button');if(!file)return;const name=file.name.toLowerCase();let mime='';if(name.endsWith('.png'))mime='image/png';else if(kind==='logo'&&name.endsWith('.svg'))mime='image/svg+xml';else if(kind==='favicon'&&name.endsWith('.ico'))mime='image/x-icon';if(!mime){showStatus('Nicht unterstuetzter Dateityp.',true);return}if(file.size===0||file.size>32748){showStatus('Datei ist zu gross (maximal 32 KiB).',true);return}button.disabled=true;input.disabled=true;try{const r=await fetch('/api/branding?kind='+kind,{method:'PUT',headers:{'Content-Type':mime},body:file});if(await showSaveResult(r)){input.value='';await loadBranding();if(kind==='logo'){const image=document.querySelector('.brand img');image.parentElement.classList.remove('has-banner');image.src='/logo.svg?v='+Date.now()}else document.querySelector('link[rel=icon]').href='/favicon.ico?v='+Date.now()}}catch(error){showStatus('Fehler: '+error.message,true)}finally{button.disabled=false;input.disabled=false}}"
         "const deviceInfo=document.querySelector('#device-info'),boardDetails=document.querySelector('#board-details');"
         "function formatBytes(value){return Number(value).toLocaleString(uiI18n.language==='de'?'de-DE':'en-US')+' B'}"
         "function formatMhz(hz){return hz?(hz/1000000).toLocaleString(uiI18n.language==='de'?'de-DE':'en-US',{maximumFractionDigits:1})+' MHz':uiI18n.t('Unbekannt')}"
         "function formatUptime(seconds){const days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600),minutes=Math.floor(seconds%3600/60);return(days?days+(uiI18n.language==='de'?' T ':' d '):'')+hours+' h '+minutes+' min'}"
         "async function loadDeviceInfo(){try{const r=await fetch('/api/device-info');if(!r.ok)throw new Error();const d=await r.json();const groups=["
-        "['Chip',[['Modell',uiI18n.t(d.chip)],['Revision',d.chip_revision_major+'.'+d.chip_revision_minor],['CPU-Kerne',String(d.cores)],['Aktueller Takt',formatMhz(d.cpu_hz)],['Maximaler Takt',formatMhz(d.cpu_max_hz)],['Bus-Takt',formatMhz(d.apb_hz)],['Quarz',formatMhz(d.xtal_hz)]]],"
+        "['Chip',[['Modell',uiI18n.t(d.chip)],['Revision',d.chip_revision_major+'.'+d.chip_revision_minor],['CPU-Kerne',String(d.cores)],['CPU-Modus',uiI18n.t(({fixed160:'Fest 160 MHz',auto160:'Automatisch 40–160 MHz',auto240:'Automatisch 40–240 MHz',fixed240:'Fest 240 MHz'})[d.cpu_mode]||d.cpu_mode)],['Takt bei Abfrage',formatMhz(d.cpu_hz)],['Maximaler Takt',formatMhz(d.cpu_max_hz)],['Bus-Takt',formatMhz(d.apb_hz)],['Quarz',formatMhz(d.xtal_hz)]]],"
         "['Speicher',[['Flash',d.flash_bytes?formatBytes(d.flash_bytes):'Unbekannt'],['Heap intern frei',formatBytes(d.internal_free_bytes)],['Heap intern gesamt',formatBytes(d.internal_total_bytes)],['Heap Minimum',formatBytes(d.internal_min_bytes)],['Größter Block',formatBytes(d.internal_largest_bytes)],['PSRAM frei',formatBytes(d.psram_free_bytes)],['PSRAM gesamt',formatBytes(d.psram_total_bytes)]]],"
         "['Firmware',[['Version',d.firmware_version],['Build',d.build_date+' '+d.build_time],['ESP-IDF',d.idf_version],['Laufzeit',formatUptime(d.uptime_seconds)]]],"
         "['WLAN',[['Name',d.hostname?d.hostname+'.local':'Unbekannt'],['MAC-Adresse',d.wifi_mac||'Unbekannt'],['IPv4',d.wifi_ipv4||'Nicht vorhanden'],['IPv6 global',d.wifi_ipv6_global||'Nicht vorhanden'],['IPv6 lokal',d.wifi_ipv6_linklocal||'Nicht vorhanden'],['Signal',d.wifi_rssi_dbm===undefined?'Nicht verbunden':d.wifi_rssi_dbm+' dBm'],['Kanal',d.wifi_channel===undefined?'Unbekannt':String(d.wifi_channel)]]]];"
@@ -2231,6 +2331,7 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "function closeSiteTitleEditor(){siteTitleInput.hidden=true;siteTitleButton.hidden=false;siteTitleButton.setAttribute('aria-expanded','false')}siteTitleButton.addEventListener('click',()=>{if(siteTitleButton.disabled)return;siteTitleInput.value=siteTitleHeading.textContent;siteTitleButton.hidden=true;siteTitleInput.hidden=false;siteTitleButton.setAttribute('aria-expanded','true');siteTitleInput.focus();siteTitleInput.select()});siteTitleInput.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();siteTitleInput.blur()}else if(event.key==='Escape'){siteTitleInput.value=savedSiteTitle;siteTitleInput.blur()}});siteTitleInput.addEventListener('blur',async()=>{const title=siteTitleInput.value.trim();closeSiteTitleEditor();if(title===savedSiteTitle)return;if(!title){siteTitleInput.value=savedSiteTitle;showStatus('Ungueltiger Titel.',true);return}siteTitleHeading.textContent=title;document.title=title;siteTitleButton.disabled=true;try{const r=await fetch('/api/site-title',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title})});if(!r.ok)throw new Error(await r.text());const data=await r.json();savedSiteTitle=data.title;siteTitleHeading.textContent=data.title;siteTitleInput.value=data.title;document.title=data.title;showStatus('');showToast('Titel gespeichert.')}catch(error){siteTitleHeading.textContent=savedSiteTitle;siteTitleInput.value=savedSiteTitle;document.title=savedSiteTitle;showStatus('Fehler: '+error.message,true)}finally{siteTitleButton.disabled=false}});"
         "wifiRefresh.addEventListener('click',()=>loadWifiNetworks().catch(error=>showWifiScanStatus('Fehler: '+error.message)));"
         "wifiForm.addEventListener('submit',async event=>{event.preventDefault();const button=wifiForm.querySelector('[type=\"submit\"]');button.disabled=true;try{const r=await fetch('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(wifiForm)))});showStatus(await r.text(),!r.ok);if(!r.ok)button.disabled=false}catch(error){showStatus('Fehler: '+error.message,true);button.disabled=false}});"
+        "cpuMode.addEventListener('change',async()=>{const selected=cpuMode.value;cpuMode.disabled=true;try{const r=await fetch('/api/cpu-mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:selected})});if(await showSaveResult(r)){savedCpuMode=selected;if(boardDetails.open)loadDeviceInfo()}else cpuMode.value=savedCpuMode}catch(error){cpuMode.value=savedCpuMode;showStatus('Fehler: '+error.message,true)}finally{cpuMode.disabled=false}});"
         "controlMode.addEventListener('change',async()=>{const mode=controlMode.value;if(mode==='auto')setJenkinsLoading(true);try{const r=await fetch('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});if(await showSaveResult(r)){setControlMode(mode);loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true))}else loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true))}finally{if(mode==='auto')setJenkinsLoading(false)}});"
         "discoEffect.addEventListener('change',async()=>{const r=await fetch('/api/disco-effect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({effect:discoEffect.value})});if(!await showSaveResult(r))loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true))});"
         "buildEffect.addEventListener('change',async()=>{buildEffect.disabled=true;try{const r=await fetch('/api/build-effect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({effect:buildEffect.value})});await showSaveResult(r)}catch(error){showStatus('Fehler: '+error.message,true)}finally{buildEffect.disabled=false;loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true))}});"
@@ -2246,19 +2347,17 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "body:JSON.stringify({url:select.value})});if(await showSaveResult(r)){if(jobCache){jobCache.selected_url=select.value;cacheJobs()}loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true))}}finally{setJenkinsLoading(false)}});"
         "document.querySelector('#traffic-light').addEventListener('load',()=>{if(adminAuthorization)loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true))});"
         "uiI18n.onChange(()=>{document.title=siteTitleHeading.textContent;showStatus(statusSource,status.dataset.error==='true');showWifiScanStatus(wifiScanSource);setJobListNote(jobListNoteSource);renderSavedWifi();renderBranding();setControlMode(controlMode.value);for(const light of Object.keys(lightLabels)){const button=document.querySelector('[data-light=\"'+light+'\"]');setLightButton(light,button.dataset.enabled==='true')}setGreyDisplay(currentGrey);if(boardDetails.open)loadDeviceInfo()});"
-        "function refreshDashboard(){restoreJobs();loadSiteTitle().catch(error=>showStatus('Fehler: '+error.message,true));loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true));loadPollInterval().catch(error=>showStatus('Fehler: '+error.message,true));refreshJenkinsRequestState();if(boardDetails.open)loadDeviceInfo()}"
+        "function refreshDashboard(){ciLightsOta.start();restoreJobs();loadSiteTitle().catch(error=>showStatus('Fehler: '+error.message,true));loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true));loadPollInterval().catch(error=>showStatus('Fehler: '+error.message,true));loadCpuMode().catch(error=>showStatus('Fehler: '+error.message,true));refreshJenkinsRequestState();if(boardDetails.open)loadDeviceInfo()}"
         "function startDashboard(){dashboardStarted=true;uiI18n.start();refreshDashboard();setInterval(()=>{if(!document.hidden&&adminAuthorization)loadLightStates().catch(()=>{})},1000);document.addEventListener('visibilitychange',()=>{if(!document.hidden&&adminAuthorization)loadLightStates().catch(()=>{})});boardDetails.addEventListener('toggle',()=>{if(boardDetails.open&&adminAuthorization)loadDeviceInfo()});setInterval(()=>{if(boardDetails.open&&adminAuthorization)loadDeviceInfo()},60000);setInterval(()=>{if(adminAuthorization)refreshJenkinsRequestState()},3000)}</script></body></html>";
 
     httpd_resp_set_type(request, "text/html; charset=utf-8");
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     esp_err_t err = httpd_resp_send(request, page, HTTPD_RESP_USE_STRLEN);
-    ESP_LOGI(HTTP_TAG, "GET / nach %lld ms beendet: %s",
-             (long long) ((esp_timer_get_time() - request_start_us) / 1000),
-             esp_err_to_name(err));
+    app_cpu_boost_end(boosted);
     return err;
 }
 
-static esp_err_t status_login_handler(httpd_req_t *request)
+static esp_err_t status_login_handler_internal(httpd_req_t *request)
 {
     char body[256];
     if (request->content_len <= 0 || request->content_len >= sizeof(body)) {
@@ -2295,6 +2394,14 @@ static esp_err_t status_login_handler(httpd_req_t *request)
     return httpd_resp_sendstr(request, "OK");
 }
 
+static esp_err_t status_login_handler(httpd_req_t *request)
+{
+    bool boosted = app_cpu_boost_begin();
+    esp_err_t err = status_login_handler_internal(request);
+    app_cpu_boost_end(boosted);
+    return err;
+}
+
 static const httpd_uri_t status_page_uri = {
     .uri = "/",
     .method = HTTP_GET,
@@ -2329,6 +2436,12 @@ static const httpd_uri_t status_wifi_delete_uri = {
     .uri = "/api/wifi",
     .method = HTTP_DELETE,
     .handler = status_wifi_delete_handler,
+};
+
+static const httpd_uri_t status_wifi_order_uri = {
+    .uri = "/api/wifi/order",
+    .method = HTTP_POST,
+    .handler = status_wifi_order_handler,
 };
 
 static const httpd_uri_t status_jobs_uri = {
@@ -2397,11 +2510,41 @@ static const httpd_uri_t status_brightness_uri = {
     .handler = status_brightness_handler,
 };
 
+static const httpd_uri_t status_cpu_mode_get_uri = {
+    .uri = "/api/cpu-mode",
+    .method = HTTP_GET,
+    .handler = status_cpu_mode_get_handler,
+};
+
+static const httpd_uri_t status_cpu_mode_post_uri = {
+    .uri = "/api/cpu-mode",
+    .method = HTTP_POST,
+    .handler = status_cpu_mode_post_handler,
+};
+
 static const httpd_uri_t status_build_effect_uri = {
     .uri = "/api/build-effect",
     .method = HTTP_POST,
     .handler = status_build_effect_handler,
 };
+
+static const httpd_uri_t ota_status_uri = {
+    .uri = "/api/ota", .method = HTTP_GET, .handler = app_ota_status_handler,
+};
+static const httpd_uri_t ota_check_uri = {
+    .uri = "/api/ota/check", .method = HTTP_POST, .handler = app_ota_check_handler,
+};
+static const httpd_uri_t ota_install_uri = {
+    .uri = "/api/ota/install", .method = HTTP_POST, .handler = app_ota_install_handler,
+};
+static const httpd_uri_t ota_script_uri = {
+    .uri = "/ota.js", .method = HTTP_GET, .handler = app_ota_script_handler,
+};
+
+bool app_config_web_ready(void)
+{
+    return s_status_server != NULL || s_provision_server != NULL;
+}
 
 static const httpd_uri_t status_control_mode_uri = {
     .uri = "/api/mode",
@@ -2465,7 +2608,7 @@ void app_start_status_server(const app_config_t *config,
     }
 
     httpd_config_t server_config = HTTPD_DEFAULT_CONFIG();
-    server_config.max_uri_handlers = 31;
+    server_config.max_uri_handlers = 40;
     server_config.stack_size = STATUS_HTTP_TASK_STACK_SIZE;
     server_config.lru_purge_enable = true;
     err = httpd_start(&s_status_server, &server_config);
@@ -2474,14 +2617,17 @@ void app_start_status_server(const app_config_t *config,
         mdns_free();
         return;
     }
-    ESP_LOGI(HTTP_TAG, "Status-Webserver gestartet; interner Heap frei %lu B",
-             (unsigned long) heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     if ((err = httpd_register_uri_handler(s_status_server, &status_page_uri)) != ESP_OK ||
         (err = httpd_register_uri_handler(s_status_server, &status_login_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_device_info_uri)) != ESP_OK ||
+        (err = register_protected_uri(s_status_server, &ota_status_uri)) != ESP_OK ||
+        (err = register_protected_uri(s_status_server, &ota_check_uri)) != ESP_OK ||
+        (err = register_protected_uri(s_status_server, &ota_install_uri)) != ESP_OK ||
+        (err = httpd_register_uri_handler(s_status_server, &ota_script_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_wifi_get_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_wifi_post_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_wifi_delete_uri)) != ESP_OK ||
+        (err = register_protected_uri(s_status_server, &status_wifi_order_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &provision_wifi_networks_uri)) != ESP_OK ||
         (err = httpd_register_uri_handler(s_status_server, &logo_uri)) != ESP_OK ||
         (err = httpd_register_uri_handler(s_status_server, &favicon_ico_uri)) != ESP_OK ||
@@ -2504,6 +2650,8 @@ void app_start_status_server(const app_config_t *config,
         (err = register_protected_uri(s_status_server, &status_manual_lights_state_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_disco_effect_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_brightness_uri)) != ESP_OK ||
+        (err = register_protected_uri(s_status_server, &status_cpu_mode_get_uri)) != ESP_OK ||
+        (err = register_protected_uri(s_status_server, &status_cpu_mode_post_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_build_effect_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_control_mode_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_api_status_uri)) != ESP_OK) {
@@ -2514,10 +2662,10 @@ void app_start_status_server(const app_config_t *config,
         return;
     }
 
-    err = esp_event_handler_register(ESP_HTTP_SERVER_EVENT, ESP_EVENT_ANY_ID,
+    err = esp_event_handler_register(ESP_HTTP_SERVER_EVENT, HTTP_SERVER_EVENT_ERROR,
                                      status_http_event_handler, NULL);
     if (err != ESP_OK) {
-        ESP_LOGW(HTTP_TAG, "HTTP-Diagnoseereignisse konnten nicht aktiviert werden: %s",
+        ESP_LOGW(HTTP_TAG, "HTTP-Fehlermeldungen konnten nicht aktiviert werden: %s",
                  esp_err_to_name(err));
     }
 
@@ -2612,8 +2760,6 @@ void app_start_provisioning(void)
                                                provision_not_found_handler));
     if (xTaskCreate(captive_dns_task, "captive_dns", 4096, NULL, 5, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Captive-Portal-DNS-Task konnte nicht gestartet werden");
-    } else {
-        ESP_LOGI(TAG, "Captive-Portal-DNS ist aktiv");
     }
 
     ESP_LOGI(TAG, "Einrichtungs-WLAN '%s' verwendet WPA3-SAE", s_provision_ssid);

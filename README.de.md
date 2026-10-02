@@ -6,6 +6,30 @@
 
 > **Experimentelles Projekt - nicht produktionsreif.** Die Server-Zertifikatspruefung fuer WPA2-Enterprise ist zu Testzwecken deaktiviert, die lokale Verwaltung verwendet unverschluesseltes HTTP. Nur in einer vertrauenswuerdigen Testumgebung verwenden.
 
+## Installation im Browser und Firmware-Updates
+
+Die Installationsseite wird nach dem ersten erfolgreichen GitHub-Pages-Deployment
+unter [wr-design-dev.github.io/CI-Lights](https://wr-design-dev.github.io/CI-Lights/)
+bereitgestellt. Mit Chrome oder Edge auf dem Computer und einem USB-Datenkabel
+kannst du dort die komplette Firmware installieren, ohne ESP-IDF zu installieren.
+Bei einem erneuten USB-Flash die Loeschoption deaktiviert lassen, um Einstellungen
+und Branding zu behalten. Die Erstinstallation des OTA-Partitionslayouts erfolgt
+einmal per USB; die bisherige Firmware kann diese Umstellung nicht per WLAN vornehmen.
+Die eigene Flash-Seite nutzt esptool-js 0.6.1 von UNPKG erst nach dem Verbinden.
+Mit **Geraet loeschen** kannst du nach Bestaetigung den gesamten Flash auch ohne
+Installation leeren. Impressum und Datenschutz sind im Seitenfuss verlinkt.
+
+Danach in der Ampel-Verwaltung **Nach Updates suchen** und bei einer neueren
+Version **Update installieren** waehlen. Die Ampel laedt das oeffentliche GitHub
+Release ueber HTTPS, prueft Groesse, SHA-256 und RSA-Signatur und startet neu.
+Bei einem unvollstaendigen Download bleibt die bisherige Firmware aktiv.
+Die neue Firmware bestaetigt einen erfolgreichen lokalen Start nach zehn Sekunden;
+ein Neustart vor dieser Bestaetigung fuehrt zur vorherigen Firmware zurueck.
+Einrichtung und gespeicherte Daten bleiben bei OTA-Updates erhalten.
+
+Die GitHub-Einrichtung, die Schluesselsicherung und der automatische Build sind
+in [Firmware-Updates einrichten](docs/firmware-updates.md) beschrieben.
+
 ## Entwicklungsumgebung mit Visual Studio Code einrichten
 
 1. [Visual Studio Code](https://code.visualstudio.com/) und die offizielle
@@ -36,9 +60,15 @@
 4. Das Ziel muss `esp32s3` sein. Es ist in `sdkconfig` bereits gesetzt; falls
    VS Code ein anderes Ziel anzeigt, `ESP-IDF: Set Espressif Device Target`
    ausfuehren und `esp32s3` waehlen. Die vorhandene Konfiguration verwendet
-   **2 MB Flash**, eine eigene Partitionstabelle (`partitions.csv`) und
+   **4 MB Flash**, eine eigene Partitionstabelle (`partitions.csv`) und
    **2 MB Quad-PSRAM**. Diese Einstellungen beim Konfigurieren beibehalten.
-5. `ESP-IDF: Build your Project` ausfuehren. Beim ersten Build muss der
+5. Vor dem ersten Build muss `secrets/ota_signing_key.pem` vorhanden sein.
+   Der Projektinhaber verwendet den gesicherten Originalschluessel. Fuer einen
+   eigenen Entwicklungs-Build im ESP-IDF-Terminal einmal
+   `python tools/prepare_ota_key.py --development` ausfuehren. Dieser Schluessel
+   erlaubt lokale USB-Installationen; offizielle OTA-Releases werden von damit
+   installierten Entwicklungsgeraeten nicht akzeptiert.
+   Dann `ESP-IDF: Build your Project` ausfuehren. Beim ersten Build muss der
    ESP-IDF Component Manager die Abhaengigkeiten cJSON und mDNS aus dem
    Internet laden. Ein erfolgreicher Build erstellt `build/CI-Lights.bin`.
 6. Das ESP32-S3-Zero zum Flashen mit einem Daten-USB-Kabel im Download-Modus
@@ -51,8 +81,8 @@
    auswaehlen. Nach dem Flashen **RESET** zum Starten der Firmware druecken.
    [Espressif-Flash-Anleitung](https://docs.espressif.com/projects/vscode-esp-idf-extension/en/latest/flashdevice.html)
 7. Falls der Port nach dem Reset wechselt, ihn erneut mit
-   `ESP-IDF: Select Port to Use` waehlen. `ESP-IDF: Monitor Device` zeigt die Start- und
-   Diagnosemeldungen. Anschliessend die unten beschriebene WLAN-Ersteinrichtung
+   `ESP-IDF: Select Port to Use` waehlen. `ESP-IDF: Monitor Device` zeigt Warnungen,
+   Fehler, die Webadresse und Hinweise zur WLAN-Einrichtung. Anschliessend die WLAN-Ersteinrichtung
    durchfuehren. [Espressif-Monitor-Anleitung](https://docs.espressif.com/projects/vscode-esp-idf-extension/en/latest/monitoroutput.html)
 
 Beim ersten Start ohne gespeicherte Konfiguration erstellt der ESP das
@@ -129,16 +159,16 @@ Die Verwaltungsseite ist in die Reiter `Job`, `Konfiguration` und `Steuerung`
 aufgeteilt.
 Unter `Konfiguration` koennen bis zu acht WLANs gespeichert werden. Die
 Netzwerksuche hilft bei der Auswahl. Ein bereits gespeicherter WLAN-Name wird
-ohne doppelten Eintrag mit den neuen Zugangsdaten aktualisiert und gilt danach
-als zuletzt gespeichert. Neue Namen werden hinzugefuegt. Sind alle acht Plaetze
-belegt, ersetzt ein neues WLAN das am laengsten nicht neu gespeicherte Profil.
-Passwoerter werden nicht in der Webseite angezeigt. Nach dem Speichern startet
-der ESP neu und versucht zuerst das neue WLAN. Bei jedem weiteren Start versucht
-er zuerst das zuletzt erfolgreich verwendete WLAN und danach die anderen
-gespeicherten WLANs. Bei mehreren Access Points mit demselben Namen bevorzugt
+ohne doppelten Eintrag mit den neuen Zugangsdaten aktualisiert und behaelt
+seine Position. Neue Namen werden am Ende eingefuegt. Sind alle acht Plaetze
+belegt, ersetzt ein neues WLAN das letzte Profil. Mit den Pfeilen in der
+Verwaltung laesst sich die Reihenfolge dauerhaft aendern. Passwoerter werden
+nicht in der Webseite angezeigt. Nach dem Speichern startet der ESP neu und
+versucht die WLANs von oben nach unten. Eine geaenderte Reihenfolge gilt ab
+dem naechsten Neustart. Bei mehreren Access Points mit demselben Namen bevorzugt
 er den mit dem staerksten Signal. Nach schnellen Fehlversuchen pausiert er kurz
 und versucht es innerhalb des Zeitfensters erneut, bevor er zum naechsten
-gespeicherten WLAN oder zur Einrichtung wechselt. Das letzte gespeicherte WLAN
+gespeicherten WLAN oder zur Einrichtung wechselt. Das einzige gespeicherte WLAN
 kann in der Verwaltung nicht entfernt werden. Einzeln gespeicherte WLANs aus
 aelteren Firmware-Versionen
 werden automatisch als erstes Profil uebernommen.
@@ -146,10 +176,18 @@ Der Bereich `Mikrocontroller` im Footer ist anfangs eingeklappt. Nach dem Aufkla
 er das erkannte Chipmodell mit Revision, Kernzahl, aktuellem CPU-Takt und maximalem
 CPU-Takt, Flash, Firmware- und ESP-IDF-Version, Build-Zeit, Laufzeit,
 WLAN-MAC-Adresse, IPv4-Adresse, globale und lokale IPv6-Adresse, Kanal und
-Signal sowie die aktuellen Speicherwerte. Der aktuelle CPU-Takt der Firmware
-ist 160 MHz; der ESP32-S3 unterstuetzt laut
+Signal sowie die aktuellen Speicherwerte. Unter `Konfiguration` kann der
+CPU-Modus auf feste 160 MHz, feste 240 MHz oder automatisch 40–160 MHz bzw.
+40–240 MHz gestellt werden. Der Wechsel wirkt ohne Neustart und wird im NVS
+gespeichert. Im Automatikmodus senkt ESP-IDF den Takt bei Leerlauf und hebt ihn
+bei WLAN-Arbeit, Jenkins-Abfragen und Verwaltungsanfragen bis zur gewaehlten
+Obergrenze an. 40 MHz sind eine Untergrenze, kein dauerhaft garantierter
+Leerlauftakt. Der angezeigte Takt wird waehrend der Geraeteabfrage gemessen und
+kann daher die Obergrenze zeigen. Der ESP32-S3 unterstuetzt laut
 [Espressif-Datenblatt](https://documentation.espressif.com/esp32-s3-mini-1_mini-1u_datasheet_en.pdf)
-maximal 240 MHz. Die Werte werden beim
+maximal 240 MHz. Der Modus kann auch ueber `GET /api/cpu-mode` gelesen und mit
+`POST /api/cpu-mode` und `{"mode":"auto240"}` geaendert werden; weitere Werte
+sind `fixed160`, `auto160` und `fixed240`. Die Werte werden beim
 Aufklappen und danach jede Minute ueber `GET /api/device-info` aktualisiert.
 Eine globale IPv6-Adresse erscheint nur, wenn das WLAN sie bereitstellt.
 Freier und gesamter
@@ -392,6 +430,17 @@ speichert die zuletzt gebaute Nummer und bleibt bei `idf.py fullclean`
 erhalten. Die Versionsnummer steht in den Firmware-Metadaten und im Footer
 der Verwaltungsseite.
 
+GitHub Actions baut bei jedem Push und Pull Request. Pushes auf `main` erzeugen
+signierte Releases und aktualisieren die Installationsseite. Andere Branches
+und Pull Requests verwenden Wegwerf-Schluessel und veroeffentlichen keine Updates.
+Die CI-Version lautet `1.0.(1000 + Workflow-Laufnummer)`; sie wird ueber
+`CI_LIGHTS_RELEASE_VERSION` festgelegt, ohne `version.txt` zu veraendern.
+
+Die Firmware wird mit `-Os` auf geringe Flash-Groesse optimiert. SDK-Info-Logs
+werden beim Uebersetzen entfernt; die benoetigten WLAN- und Einrichtungshinweise
+bleiben erhalten. Fuer den Platzbedarf im Flash zaehlt `build/CI-Lights.bin`;
+die deutlich groesseren ELF- und Map-Dateien enthalten auch Debug-Informationen.
+
 ## Abhaengigkeit und Sicherheit
 
 Die Datei `main/idf_component.yml` fuegt die cJSON- und mDNS-Komponenten von
@@ -401,9 +450,16 @@ sie aus dem Internet laden.
 WLAN- und Jenkins-Daten liegen nicht im Sourcecode, werden aber unverschluesselt
 im Flash des ESP gespeichert.
 
-Es gibt bewusst keine OTA-Updates. Die einzige Firmware-Partition umfasst
-1,75 MiB des 2-MiB-Flashs und wird per USB geflasht. Die letzten 128 KiB
-sind fuer hochgeladenes Branding reserviert.
+Die 4-MiB-Partitionierung enthaelt zwei Firmware-Slots mit je 1,75 MiB und
+eine 128-KiB-Branding-Partition. Signierte OTA-Updates wechseln zwischen den
+Slots. Die Signatur wird in Software gegen den oeffentlichen Schluessel der
+laufenden Firmware geprueft. Hardware-Secure-Boot und Flash-Verschluesselung
+sind nicht aktiviert; eFuses werden durch diese Einrichtung nicht veraendert.
+Der private RSA-Schluessel ist weder in der Firmware noch im Repository
+enthalten. Die lokale PEM-Datei ist unverschluesselt und muss geschuetzt sowie
+separat verschluesselt gesichert werden. GitHub verwendet ein Environment-Secret
+mit Zugriff nur fuer `main`. Wer vertrauenswuerdigen Build-Code auf `main`
+veraendern kann, kann auch diesen Schluessel auslesen.
 
 Das Einrichtungs-WLAN ist mit WPA3-SAE und einem nach jedem Neustart neu
 erzeugten LED-Code geschuetzt. Das Captive Portal nutzt dennoch HTTP; wer

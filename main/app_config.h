@@ -14,6 +14,14 @@
 #define APP_LIGHT_BRIGHTNESS_DEFAULT_PERCENT 50
 
 typedef enum {
+    APP_CPU_MODE_FIXED_160,
+    APP_CPU_MODE_AUTO_160,
+    APP_CPU_MODE_AUTO_240,
+    APP_CPU_MODE_FIXED_240,
+    APP_CPU_MODE_COUNT,
+} app_cpu_mode_t;
+
+typedef enum {
     APP_BUILD_EFFECT_PULSE,
     APP_BUILD_EFFECT_BLINK,
     APP_BUILD_EFFECT_COUNT,
@@ -30,6 +38,7 @@ typedef struct {
     uint32_t jenkins_poll_interval_minutes;
     uint8_t light_brightness_percent;
     app_build_effect_t build_effect;
+    app_cpu_mode_t cpu_mode;
 } app_config_t;
 
 typedef void (*app_job_selected_handler_t)(const app_config_t *config);
@@ -85,6 +94,7 @@ bool app_config_load(app_config_t *config);
 bool app_connect_to_wifi(const app_config_t *config, uint32_t timeout_ms);
 void app_stop_wifi(void);
 void app_start_provisioning(void);
+bool app_config_web_ready(void);
 void app_start_status_server(const app_config_t *config,
                              app_job_selected_handler_t job_selected_handler,
                              app_manual_light_handler_t manual_light_handler,

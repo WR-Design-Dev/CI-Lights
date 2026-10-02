@@ -1,11 +1,12 @@
 #include "app_config.h"
+#include "app_cpu.h"
+#include "app_ota.h"
 #include "app_settings.h"
 #include "factory_reset.h"
 #include "jenkins_client.h"
 #include "cJSON.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_system.h"
 #include "traffic_light.h"
 
 #include <string.h>
@@ -25,10 +26,18 @@ static void json_free(void *pointer)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Firmware gestartet; Reset-Grund %d", (int) esp_reset_reason());
+    /* Keep connection/setup addresses visible while other components stay quiet. */
+    esp_log_level_set("network", ESP_LOG_INFO);
+    esp_log_level_set("provision", ESP_LOG_INFO);
     cJSON_Hooks json_hooks = {.malloc_fn = json_malloc, .free_fn = json_free};
     cJSON_InitHooks(&json_hooks);
     app_storage_init();
+    app_ota_init();
+    esp_err_t cpu_err = app_cpu_init();
+    if (cpu_err != ESP_OK) {
+        ESP_LOGW(TAG, "CPU-Leistungssperre konnte nicht eingerichtet werden: %s",
+                 esp_err_to_name(cpu_err));
+    }
     traffic_light_init();
     factory_reset_button_init();
     app_network_init();
@@ -36,6 +45,7 @@ void app_main(void)
     if (!app_admin_password_is_set()) {
         ESP_LOGW(TAG, "Verwaltungspasswort fehlt; starte die Einrichtung");
         app_start_provisioning();
+        app_ota_confirm_startup(app_config_web_ready());
         return;
     }
 
@@ -46,9 +56,15 @@ void app_main(void)
     if (wifi_profiles == NULL || !app_config_load(&config) ||
         !app_wifi_profiles_load(wifi_profiles)) {
         heap_caps_free(wifi_profiles);
-        ESP_LOGI(TAG, "Keine WLAN-Konfiguration gefunden");
         app_start_provisioning();
+        app_ota_confirm_startup(app_config_web_ready());
         return;
+    }
+
+    cpu_err = app_cpu_apply_mode(config.cpu_mode);
+    if (cpu_err != ESP_OK) {
+        ESP_LOGE(TAG, "CPU-Modus konnte nicht aktiviert werden: %s", esp_err_to_name(cpu_err));
+        config.cpu_mode = app_cpu_current_mode();
     }
 
     traffic_light_set_brightness(config.light_brightness_percent);
@@ -56,13 +72,11 @@ void app_main(void)
 
     bool wifi_connected = false;
     for (uint8_t attempt = 0; attempt < wifi_profiles->count; ++attempt) {
-        uint8_t index = (wifi_profiles->last_index + attempt) % wifi_profiles->count;
+        uint8_t index = attempt;
         const app_wifi_profile_t *profile = &wifi_profiles->entries[index];
         memcpy(config.wifi_ssid, profile->ssid, sizeof(config.wifi_ssid));
         memcpy(config.wifi_username, profile->username, sizeof(config.wifi_username));
         memcpy(config.wifi_password, profile->password, sizeof(config.wifi_password));
-        ESP_LOGI(TAG, "WLAN %u/%u: versuche '%s'", attempt + 1, wifi_profiles->count,
-                 config.wifi_ssid);
         uint32_t timeout_ms = wifi_profiles->count == 1 ? 45000 :
                               attempt == 0 ? 30000 : 15000;
         if (app_connect_to_wifi(&config, timeout_ms)) {
@@ -80,8 +94,8 @@ void app_main(void)
     if (!wifi_connected) {
         ESP_LOGE(TAG, "Keines der gespeicherten WLANs erreichbar");
         traffic_light_set(TRAFFIC_LIGHT_RED);
-        ESP_LOGI(TAG, "Wechsle zum Captive Portal fuer die WLAN-Einrichtung");
         app_start_provisioning();
+        app_ota_confirm_startup(app_config_web_ready());
         return;
     }
 
@@ -91,15 +105,14 @@ void app_main(void)
                             traffic_light_set_disco_effect, traffic_light_disco_effect,
                             traffic_light_set_brightness, traffic_light_brightness);
     jenkins_client_start_polling();
+    app_ota_confirm_startup(app_config_web_ready());
 
     if (config.jenkins_url[0] == '\0') {
-        ESP_LOGI(TAG, "Noch keine Jenkins-Zugangsdaten; oeffne die Ampel-Webseite");
         traffic_light_set(TRAFFIC_LIGHT_RED);
         traffic_light_start_error_sos_animation();
         return;
     }
     if (config.jenkins_job_path[0] == '\0') {
-        ESP_LOGI(TAG, "Noch kein Jenkins-Job ausgewaehlt");
         traffic_light_set(TRAFFIC_LIGHT_RED);
         traffic_light_start_error_sos_animation();
         return;

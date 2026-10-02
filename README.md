@@ -6,6 +6,28 @@
 
 > **Experimental project — not production ready.** WPA2-Enterprise server certificate verification is disabled for testing, and the local administration interface uses unencrypted HTTP. Use only in a trusted test environment.
 
+## Browser installation and firmware updates
+
+After the first successful GitHub Pages deployment, the installer is available
+at [wr-design-dev.github.io/CI-Lights](https://wr-design-dev.github.io/CI-Lights/).
+Use Chrome or Edge on a computer and a USB data cable to install the complete
+firmware without installing ESP-IDF. Leave the erase option unchecked when
+reinstalling to preserve settings and branding. Migrating an older device to
+the OTA partition layout requires one complete USB installation.
+The custom installer loads esptool-js 0.6.1 from UNPKG after connecting.
+Its separate **Geraet loeschen** button erases the whole flash after confirmation,
+without installing firmware. Legal notice and privacy links are in the footer.
+
+For subsequent updates, open device administration, choose **Check for updates**,
+then **Install update**. The device downloads the public GitHub Release over HTTPS,
+checks its size, SHA-256 and RSA signature, and restarts. An incomplete download
+leaves the previous firmware active. The new firmware confirms successful local
+startup after ten seconds; a reset before confirmation rolls back to the previous
+firmware. Settings and uploaded branding are preserved during OTA updates.
+
+See [firmware hosting and signing setup](docs/firmware-updates.md) for GitHub
+configuration and signing key backup instructions.
+
 ## Set up Visual Studio Code and the ESP-IDF extension
 
 1. Install [Visual Studio Code](https://code.visualstudio.com/) and the official
@@ -32,9 +54,13 @@
    a local `.vscode` configuration.
 4. The device target must be `esp32s3`. It is already set in `sdkconfig`; if
    VS Code shows another target, run `ESP-IDF: Set Espressif Device Target`
-   and select `esp32s3`. Keep the existing configuration: **2 MB flash**, the
+   and select `esp32s3`. Keep the existing configuration: **4 MB flash**, the
    custom partition table (`partitions.csv`), and **2 MB Quad PSRAM**.
-5. Run `ESP-IDF: Build your Project`. On the first build, the ESP-IDF Component
+5. The first build requires `secrets/ota_signing_key.pem`. The project owner
+   restores the original signing key. For your own development build, run
+   `python tools/prepare_ota_key.py --development` once in the ESP-IDF terminal.
+   Devices installed with this development key via USB will not accept official
+   OTA releases. Then run `ESP-IDF: Build your Project`. On the first build, the ESP-IDF Component
    Manager needs internet access to download the cJSON and mDNS dependencies.
    A successful build creates `build/CI-Lights.bin`.
 6. Connect the ESP32-S3-Zero with a data-capable USB cable in download mode.
@@ -46,7 +72,8 @@
    the **UART** flash method. Press **RESET** after flashing to start the firmware.
    [Espressif flashing guide](https://docs.espressif.com/projects/vscode-esp-idf-extension/en/latest/flashdevice.html)
 7. If the port changes after reset, select it again with
-   `ESP-IDF: Select Port to Use`. Run `ESP-IDF: Monitor Device` to view startup and diagnostic logs.
+   `ESP-IDF: Select Port to Use`. Run `ESP-IDF: Monitor Device` to view warnings,
+   errors, the device web address, and Wi-Fi setup instructions.
    Then follow the Wi-Fi first-time setup described below.
    [Espressif monitor guide](https://docs.espressif.com/projects/vscode-esp-idf-extension/en/latest/monitoroutput.html)
 
@@ -127,16 +154,16 @@ take effect no later than the next one-minute polling check.
 The administration page has `Job`, `Configuration`, and `Controls` tabs.
 Under `Configuration`, up to eight Wi-Fi networks can be saved. A network
 scan helps with selection. Saving an existing network name updates its
-credentials without adding a duplicate and marks it as the most recently
-saved profile. New names are added. If all eight slots are occupied, a new
-network replaces the profile that has gone the longest without being saved
-again. Passwords are not displayed on the website. After saving, the ESP
-restarts and tries the new network first. On later boots, it first tries the
-last successfully used network, then the other saved networks. When several
+credentials without adding a duplicate and keeps its position. New names are
+added at the end. If all eight slots are occupied, a new network replaces the
+last profile. The arrows in the management page persistently change the order.
+Passwords are not displayed on the website. After saving, the ESP restarts
+and tries the networks from top to bottom. A changed order takes effect after
+the next restart. When several
 access points share a name, it prefers the strongest signal. After quick
 connection failures, it pauses briefly and retries within the time window
 before moving to the next saved network or returning to setup. The last
-saved Wi-Fi network cannot be removed through the administration page.
+remaining Wi-Fi network cannot be removed through the administration page.
 Single saved networks from older firmware versions are automatically
 imported as the first profile.
 
@@ -144,10 +171,18 @@ The `Microcontroller` section in the footer is collapsed initially. When
 expanded, it shows the detected chip model and revision, core count, current
 and maximum CPU clock, flash, firmware and ESP-IDF versions, build time,
 uptime, Wi-Fi MAC address, IPv4 address, global and link-local IPv6 addresses,
-channel, signal strength, and current memory values. This firmware runs the
-CPU at 160 MHz; according to the
+channel, signal strength, and current memory values. Under `Configuration`,
+the CPU mode can be set to fixed 160 MHz, fixed 240 MHz, automatic 40–160 MHz,
+or automatic 40–240 MHz. The change takes effect without a restart and is
+stored in NVS. In automatic mode, ESP-IDF reduces the clock when idle and
+raises it up to the selected limit for Wi-Fi work, Jenkins polling, and
+management requests. 40 MHz is a lower bound, not a guaranteed continuous idle
+clock. The displayed clock is sampled during the device-information request
+and may therefore show the upper limit. According to the
 [Espressif datasheet](https://documentation.espressif.com/esp32-s3-mini-1_mini-1u_datasheet_en.pdf),
-the ESP32-S3 supports up to 240 MHz. The values are updated when the section
+the ESP32-S3 supports up to 240 MHz. The mode is also available through
+`GET /api/cpu-mode` and `POST /api/cpu-mode` with `{"mode":"auto240"}`; the other
+values are `fixed160`, `auto160`, and `fixed240`. The values are updated when the section
 is expanded and every minute afterward through `GET /api/device-info`. A
 global IPv6 address appears only if the Wi-Fi network provides one. Free and
 total internal heap, its historical minimum, the largest free block, and
@@ -380,6 +415,17 @@ Every successful `idf.py build` increments the firmware version in the
 last built number and survives `idf.py fullclean`. The version appears in
 the firmware metadata and in the administration page footer.
 
+GitHub Actions builds every push and pull request. Pushes to `main` publish
+signed releases and update the installation website. Other branches and pull
+requests use disposable signing keys and do not publish updates. CI versions
+are `1.0.(1000 + workflow run number)`, selected through
+`CI_LIGHTS_RELEASE_VERSION` without changing `version.txt`.
+
+The firmware uses `-Os` to optimize flash size. SDK info logs are removed at
+compile time; essential Wi-Fi and setup messages remain. Flash usage is measured
+by `build/CI-Lights.bin`; the much larger ELF and map files also contain debugging
+information.
+
 ## Dependencies and security
 
 `main/idf_component.yml` adds Espressif's cJSON and mDNS components. On the
@@ -389,9 +435,14 @@ from the internet.
 Wi-Fi and Jenkins credentials are not in the source code, but are stored
 unencrypted in the ESP's flash.
 
-There are intentionally no OTA updates. The only firmware partition is
-1.75 MiB of the 2 MiB flash and is flashed over USB. The final 128 KiB
-is reserved for uploaded branding.
+The 4 MiB partition layout has two 1.75 MiB application slots and a 128 KiB
+branding partition. Signed OTA updates alternate between the slots. Signatures
+are verified in software against the public key of the running firmware.
+Hardware Secure Boot and Flash Encryption remain disabled; this setup does not
+change eFuses. The private RSA key is absent from firmware and source control.
+Its local PEM file is unencrypted and must be protected and backed up separately
+with encryption. GitHub uses an environment secret restricted to `main`. Anyone
+who can change trusted build code on `main` can potentially extract this key.
 
 The setup Wi-Fi network uses WPA3-SAE and a new LED-displayed code after every
 restart. The captive portal still uses HTTP; someone with access to the setup

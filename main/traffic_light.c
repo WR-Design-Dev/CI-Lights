@@ -153,10 +153,17 @@ static bool transmit_ws2812_pixels(rmt_channel_handle_t channel, rmt_encoder_han
 {
     xSemaphoreTake(mutex, portMAX_DELAY);
     const rmt_transmit_config_t transmit_config = {0};
-    esp_err_t err = rmt_transmit(channel, encoder, pixels, pixel_data_size,
-                                 &transmit_config);
+    esp_err_t err = rmt_enable(channel);
     if (err == ESP_OK) {
-        err = rmt_tx_wait_all_done(channel, portMAX_DELAY);
+        err = rmt_transmit(channel, encoder, pixels, pixel_data_size,
+                           &transmit_config);
+        if (err == ESP_OK) {
+            err = rmt_tx_wait_all_done(channel, portMAX_DELAY);
+        }
+        esp_err_t disable_err = rmt_disable(channel);
+        if (err == ESP_OK) {
+            err = disable_err;
+        }
     }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "%s konnte nicht gesetzt werden: %s", light_name, esp_err_to_name(err));
@@ -462,9 +469,6 @@ static bool init_ws2812(rmt_channel_handle_t *channel, rmt_encoder_handle_t *enc
         };
         err = rmt_new_simple_encoder(&encoder_config, encoder);
     }
-    if (err == ESP_OK) {
-        err = rmt_enable(*channel);
-    }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "%s ist nicht verfuegbar: %s", light_name, esp_err_to_name(err));
         return false;
@@ -503,7 +507,6 @@ static void render_stored_status(void)
 void traffic_light_set(traffic_light_color_t color)
 {
     if (s_control_mode != APP_CONTROL_MODE_AUTO) {
-        ESP_LOGI(TAG, "Jenkins-Status wird durch die gewaehlte Betriebsart ignoriert");
         return;
     }
 
@@ -518,7 +521,6 @@ void traffic_light_set(traffic_light_color_t color)
 void traffic_light_set_build_running(traffic_light_color_t color)
 {
     if (s_control_mode != APP_CONTROL_MODE_AUTO) {
-        ESP_LOGI(TAG, "Jenkins-Status wird durch die gewaehlte Betriebsart ignoriert");
         return;
     }
 

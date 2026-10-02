@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="description" content="Installiere CI-Lights auf deinem ESP32-S3 direkt im Browser. Spätere Updates startest du über die Ampel-Verwaltung.">
+  <title>CI-Lights installieren</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="installer.js"></script>
+</head>
+<body>
+  <main>
+    <header class="brand"><a href="https://github.com/WR-Design-Dev/CI-Lights">CI-Lights</a><span>Open Source · ESP32-S3</span></header>
+    <section class="hero" aria-labelledby="title">
+      <div class="intro">
+        <p class="eyebrow">Dein Build-Status. Auf einen Blick.</p>
+        <h1 id="title">Bring deine<br>Ampel zum Leuchten.</h1>
+        <p class="lead">Installiere CI-Lights per USB direkt im Browser. Richte danach dein WLAN und Jenkins ein. Spätere Firmware-Updates startest du bequem in der Ampel-Verwaltung.</p>
+        <div class="device-tag">ESP32-S3 · 4 MiB Flash · 2 MiB PSRAM</div>
+      </div>
+      <div class="traffic-light" aria-hidden="true"><span class="lamp red"></span><span class="lamp yellow"></span><span class="lamp green"></span><div class="pole"></div><div class="base"></div></div>
+    </section>
+    <section class="install-card" aria-labelledby="install-title">
+      <div><p class="eyebrow">Erste Installation</p><h2 id="install-title">Verbinden. Installieren. Fertig.</h2><p>Du brauchst ein USB-Datenkabel und einen Browser mit Web Serial, zum Beispiel Chrome oder Edge auf dem Computer.</p></div>
+      <div class="install-action">
+        <p class="version">Firmware <strong id="firmware-version">wird geladen …</strong></p>
+        <button id="connect" class="install-button" type="button" disabled>Ampel per USB verbinden <span aria-hidden="true">↗</span></button>
+        <div id="flash-controls" hidden>
+          <label class="erase-option"><input id="erase" type="checkbox"> Alle Gerätedaten löschen</label>
+          <p class="erase-help">Ausgeschaltet lassen, um WLAN, Zugangsdaten und Branding zu behalten.</p>
+          <button id="flash" class="install-button" type="button" disabled>Firmware installieren</button>
+          <button id="erase-device" class="secondary-button danger-button" type="button" disabled>Gerät löschen</button>
+          <button id="disconnect" class="secondary-button" type="button" disabled>Verbindung trennen</button>
+        </div>
+        <progress id="flash-progress" max="100" value="0" aria-label="Installationsfortschritt" hidden></progress>
+        <p id="installer-status" class="status" role="status">Firmware-Dateien werden geprüft …</p>
+        <p class="privacy-note">„Verbinden“ lädt esptool-js von unpkg.com. Die USB-Kommunikation erfolgt lokal im Browser. <a href="datenschutz.html">Datenschutzhinweise</a></p>
+        <a id="release-link" href="https://github.com/WR-Design-Dev/CI-Lights/releases" target="_blank" rel="noopener">Versionen und Downloads</a>
+      </div>
+    </section>
+    <section class="steps" aria-label="So funktioniert die Einrichtung">
+      <article><span class="step-number">01</span><h3>Ampel anschließen</h3><p>Verbinde den ESP über ein USB-Datenkabel mit deinem Computer. Schließe vorher einen geöffneten seriellen Monitor.</p></article>
+      <article><span class="step-number">02</span><h3>Firmware installieren</h3><p>Klicke auf „Ampel per USB verbinden“, wähle den USB-Port und starte „Firmware installieren“. Falls keine Verbindung möglich ist: BOOT gedrückt halten, RESET kurz drücken, dann BOOT loslassen und erneut verbinden.</p></article>
+      <article><span class="step-number">03</span><h3>WLAN und Jenkins einrichten</h3><p>Nach dem Neustart zeigt die Ampel den LED-Code für das Einrichtungs-WLAN. Verbinde dich damit und öffne das Einrichtungsportal.</p></article>
+    </section>
+    <section class="next-update"><div class="update-icon" aria-hidden="true">↻</div><div><h2>Das nächste Update geht ohne Kabel.</h2><p>Öffne die Ampel-Verwaltung und wähle „Nach Updates suchen“. Mit „Update installieren“ lädt die Ampel die neue Firmware, prüft sie und startet neu.</p></div></section>
+    <p class="data-note">Bei einer erneuten USB-Installation bleiben Einstellungen erhalten, wenn du die Löschoption deaktiviert lässt. „Alle Gerätedaten löschen“ leert den Flash vor der Installation. Mit „Gerät löschen“ kannst du den gesamten Flash auch ohne Installation leeren; danach ist keine Firmware mehr vorhanden. Während des Schreibens oder Löschens das Kabel angeschlossen lassen.</p>
+    <footer><span>CI-Lights</span><a href="https://github.com/WR-Design-Dev/CI-Lights">Quellcode auf GitHub</a><a href="https://github.com/WR-Design-Dev/CI-Lights/blob/main/README.de.md">Anleitung</a><a href="impressum.html">Impressum</a><a href="datenschutz.html">Datenschutz</a></footer>
+  </main>
+</body>
+</html>

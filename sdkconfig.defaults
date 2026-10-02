@@ -1,9 +1,27 @@
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
+# 4 MiB flash with two application slots; rollback after a failed first boot.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Verify RSA-signed OTA images in software, without enabling hardware Secure Boot.
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
+CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
+CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
+CONFIG_SECURE_BOOT_SIGNING_KEY="secrets/ota_signing_key.pem"
+CONFIG_APP_OTA_GITHUB_REPOSITORY="WR-Design-Dev/CI-Lights"
+
+# Optimize application code for flash size rather than source-level debugging.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
 # Verify the Jenkins HTTPS certificate with the common root certificate bundle.
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
+
+# Allow the CPU clock to change at runtime from the management page.
+CONFIG_PM_ENABLE=y
 
 # ESP32-S3FH4R2: 2 MB Quad PSRAM for larger allocations.
 CONFIG_SPIRAM=y
@@ -17,5 +35,13 @@ CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
 # WPA3-only setup access point for the LED-displayed one-time password.
 CONFIG_ESP_WIFI_SOFTAP_SAE_SUPPORT=y
 
+# Passwordless station connections can use plain open Wi-Fi or Enhanced Open.
+CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA=y
+
 # Allow an IPv6 address from router advertisements when the WLAN provides one.
 CONFIG_LWIP_IPV6_AUTOCONFIG=y
+
+# Compile warnings/errors; essential Wi-Fi/setup info is enabled locally in source.
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y

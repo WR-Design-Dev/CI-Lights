@@ -1,0 +1,9 @@
+menu "CI-Lights firmware updates"
+    config APP_OTA_GITHUB_REPOSITORY
+        string "Public GitHub repository for OTA release assets"
+        default "WR-Design-Dev/CI-Lights"
+        help
+            Repository in owner/name format. The latest stable release must
+            include ota-manifest.json and the signed CI-Lights.bin application.
+            The device never stores GitHub access tokens.
+endmenu

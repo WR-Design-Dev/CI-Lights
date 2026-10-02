@@ -1,4 +1,5 @@
 #include "jenkins_client.h"
+#include "app_cpu.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -8,11 +9,9 @@
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "esp_err.h"
-#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "traffic_light.h"
@@ -51,28 +50,6 @@ static esp_err_t http_event_handler(esp_http_client_event_t *event)
     }
 
     return ESP_OK;
-}
-
-static void log_runtime_diagnostics(void)
-{
-    const uint32_t internal_free = (uint32_t) heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    const uint32_t internal_min = (uint32_t) heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    const uint32_t internal_largest = (uint32_t) heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    const uint32_t psram_free = (uint32_t) heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    wifi_ap_record_t ap = {0};
-    esp_err_t wifi_err = esp_wifi_sta_get_ap_info(&ap);
-
-    if (wifi_err == ESP_OK) {
-        ESP_LOGI(TAG, "Diagnose: WLAN RSSI %d dBm, Kanal %u; Heap intern frei %lu B, Minimum %lu B, groesster Block %lu B; PSRAM frei %lu B",
-                 ap.rssi, ap.primary, (unsigned long) internal_free,
-                 (unsigned long) internal_min, (unsigned long) internal_largest,
-                 (unsigned long) psram_free);
-    } else {
-        ESP_LOGW(TAG, "Diagnose: WLAN nicht verbunden (%s); Heap intern frei %lu B, Minimum %lu B, groesster Block %lu B; PSRAM frei %lu B",
-                 esp_err_to_name(wifi_err), (unsigned long) internal_free,
-                 (unsigned long) internal_min, (unsigned long) internal_largest,
-                 (unsigned long) psram_free);
-    }
 }
 
 static bool update_traffic_light_from_response(const http_response_t *response)
@@ -122,7 +99,6 @@ static bool update_traffic_light_from_response(const http_response_t *response)
         traffic_light_set(traffic_light_color);
     }
 
-    ESP_LOGI(TAG, "Jenkins-Farbe: %s", jenkins_color);
     cJSON_Delete(json);
     return true;
 }
@@ -134,7 +110,6 @@ static bool jenkins_client_request_internal(const app_config_t *config, bool sho
         *retryable = false;
     }
     if (traffic_light_control_mode() != APP_CONTROL_MODE_AUTO) {
-        ESP_LOGI(TAG, "Jenkins-Abfrage wird durch die gewaehlte Betriebsart ausgesetzt");
         return true;
     }
     if (config == NULL || config->jenkins_url[0] == '\0' ||
@@ -180,17 +155,12 @@ static bool jenkins_client_request_internal(const app_config_t *config, bool sho
         s_request_in_progress = true;
         traffic_light_start_query_animation();
     }
-    int64_t request_start_us = esp_timer_get_time();
-    ESP_LOGI(TAG, "Jenkins-Abfrage startet");
+    bool boosted = app_cpu_boost_begin();
     esp_err_t err = esp_http_client_perform(client);
-    ESP_LOGI(TAG, "Jenkins-Abfrage beendet nach %lld ms: %s",
-             (long long) ((esp_timer_get_time() - request_start_us) / 1000),
-             esp_err_to_name(err));
 
     int status_code = esp_http_client_get_status_code(client);
     bool status_updated = false;
     if (err == ESP_OK && status_code >= 200 && status_code < 300) {
-        ESP_LOGI(TAG, "Jenkins antwortete mit HTTP-Status %d", status_code);
         status_updated = update_traffic_light_from_response(&response);
         if (!status_updated) {
             traffic_light_set(TRAFFIC_LIGHT_RED);
@@ -208,8 +178,7 @@ static bool jenkins_client_request_internal(const app_config_t *config, bool sho
                      (err == ESP_OK && status_code >= 200 && status_code < 300);
     }
     esp_http_client_cleanup(client);
-    ESP_LOGI(TAG, "Jenkins-Abfrage: Stackreserve der Task %lu B",
-             (unsigned long) uxTaskGetStackHighWaterMark(NULL));
+    app_cpu_boost_end(boosted);
     if (show_loading) {
         s_request_in_progress = false;
     }
@@ -235,11 +204,9 @@ void jenkins_client_set_control_mode(app_control_mode_t mode)
 {
     traffic_light_set_control_mode(mode);
     if (mode != APP_CONTROL_MODE_AUTO) {
-        ESP_LOGI(TAG, "Betriebsart ausserhalb von Jenkins aktiviert");
         return;
     }
 
-    ESP_LOGI(TAG, "Jenkins-Betriebsart aktiviert; aktualisiere Jenkins-Status");
     app_config_t config = {0};
     if (app_config_load(&config) && config.jenkins_url[0] != '\0' &&
         config.jenkins_job_path[0] != '\0') {
@@ -251,13 +218,11 @@ static void jenkins_poll_task(void *argument)
 {
     (void) argument;
 
-    log_runtime_diagnostics();
 
     /* Perform the first HTTPS request in the polling task rather than app_main. */
     app_config_t initial_config = {0};
     if (app_config_load(&initial_config) && initial_config.jenkins_url[0] != '\0' &&
         initial_config.jenkins_job_path[0] != '\0') {
-        ESP_LOGI(TAG, "Frage Jenkins direkt nach dem Start ab");
         for (unsigned attempt = 0; attempt < JENKINS_STARTUP_RETRY_COUNT; ++attempt) {
             bool retryable = false;
             if (jenkins_client_request_internal(&initial_config, true, &retryable) ||
@@ -267,9 +232,6 @@ static void jenkins_poll_task(void *argument)
             if (attempt + 1 == JENKINS_STARTUP_RETRY_COUNT) {
                 break;
             }
-            ESP_LOGW(TAG, "Startabfrage fehlgeschlagen; neuer Versuch in %u ms (%u/%u)",
-                     JENKINS_STARTUP_RETRY_DELAY_MS, attempt + 2,
-                     JENKINS_STARTUP_RETRY_COUNT);
             vTaskDelay(pdMS_TO_TICKS(JENKINS_STARTUP_RETRY_DELAY_MS));
             if (traffic_light_control_mode() != APP_CONTROL_MODE_AUTO ||
                 !app_config_load(&initial_config) || initial_config.jenkins_url[0] == '\0' ||
@@ -283,7 +245,6 @@ static void jenkins_poll_task(void *argument)
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(JENKINS_POLL_CHECK_INTERVAL_MS));
-        log_runtime_diagnostics();
 
         app_config_t config = {0};
         if (!app_config_load(&config) || config.jenkins_url[0] == '\0' ||
@@ -298,8 +259,6 @@ static void jenkins_poll_task(void *argument)
         int64_t poll_interval_us = (int64_t) poll_interval_minutes * 60 * 1000000;
         int64_t now_us = esp_timer_get_time();
         if (now_us - last_poll_time_us >= poll_interval_us) {
-            ESP_LOGI(TAG, "Frage Jenkins nach %lu Minuten erneut ab",
-                     (unsigned long) poll_interval_minutes);
             jenkins_client_request_without_loading(&config);
             last_poll_time_us = now_us;
         }

@@ -21,10 +21,12 @@
 #define NVS_KEY_JENKINS_POLL_INTERVAL "jenkins_poll"
 #define NVS_KEY_LIGHT_BRIGHTNESS "brightness"
 #define NVS_KEY_BUILD_EFFECT "build_effect"
+#define NVS_KEY_CPU_MODE "cpu_mode"
 #define NVS_KEY_UI_LANGUAGE "ui_language"
 #define NVS_KEY_SITE_TITLE "site_title"
 #define NVS_KEY_WIFI_COUNT "wifi_count"
 #define NVS_KEY_WIFI_LAST "wifi_last"
+#define NVS_KEY_WIFI_ORDERED "wifi_ordered"
 #define NVS_KEY_ADMIN_SALT "admin_salt"
 #define NVS_KEY_ADMIN_HASH "admin_hash"
 #define NVS_KEY_ADMIN_USERNAME "admin_user"
@@ -137,14 +139,21 @@ static bool legacy_wifi_keys_present(nvs_handle_t handle)
     return false;
 }
 
+/* NVS keys allow 15 characters; wifi_password plus '_' leaves one digit. */
+_Static_assert(APP_WIFI_PROFILE_MAX_COUNT <= 10,
+               "WLAN profile keys require single-digit indices");
+
 static void wifi_profile_key(char key[16], const char *prefix, uint8_t index)
 {
-    snprintf(key, 16, "%s_%u", prefix, index);
+    snprintf(key, 16, "%s_%c", prefix, '0' + index);
 }
 
 static esp_err_t load_wifi_profile(nvs_handle_t handle, uint8_t index, bool indexed,
                                    app_wifi_profile_t *profile)
 {
+    if (indexed && index >= APP_WIFI_PROFILE_MAX_COUNT) {
+        return ESP_ERR_INVALID_ARG;
+    }
     char key[16];
     if (indexed) {
         wifi_profile_key(key, NVS_KEY_WIFI_SSID, index);
@@ -414,6 +423,7 @@ bool app_config_load(app_config_t *config)
     config->jenkins_poll_interval_minutes = APP_JENKINS_POLL_INTERVAL_DEFAULT_MINUTES;
     config->light_brightness_percent = APP_LIGHT_BRIGHTNESS_DEFAULT_PERCENT;
     config->build_effect = APP_BUILD_EFFECT_PULSE;
+    config->cpu_mode = APP_CPU_MODE_FIXED_160;
 
     nvs_handle_t nvs_handle;
     if (nvs_open(SETTINGS_NAMESPACE, NVS_READONLY, &nvs_handle) != ESP_OK) {
@@ -485,6 +495,11 @@ bool app_config_load(app_config_t *config)
         build_effect < APP_BUILD_EFFECT_COUNT) {
         config->build_effect = (app_build_effect_t) build_effect;
     }
+    uint8_t cpu_mode = APP_CPU_MODE_FIXED_160;
+    if (nvs_get_u8(nvs_handle, NVS_KEY_CPU_MODE, &cpu_mode) == ESP_OK &&
+        cpu_mode < APP_CPU_MODE_COUNT) {
+        config->cpu_mode = (app_cpu_mode_t) cpu_mode;
+    }
     nvs_close(nvs_handle);
 
     if (jenkins_err != ESP_OK || !app_config_jenkins_is_valid(config)) {
@@ -535,13 +550,27 @@ bool app_wifi_profiles_load(app_wifi_profiles_t *profiles)
         last_index < count) {
         profiles->last_index = last_index;
     }
+    uint8_t ordered = 0;
+    bool order_migration_needed = err == ESP_OK &&
+                                  nvs_get_u8(handle, NVS_KEY_WIFI_ORDERED, &ordered) != ESP_OK;
     bool legacy_present = err == ESP_OK && legacy_wifi_keys_present(handle);
     nvs_close(handle);
     if (err != ESP_OK) {
         return false;
     }
     bool duplicates_removed = remove_duplicate_wifi_profiles(profiles);
-    if (legacy_present || duplicates_removed) {
+    if (order_migration_needed) {
+        /* Preserve the previous boot order once when upgrading: last used first. */
+        uint8_t shifts = profiles->last_index;
+        for (uint8_t i = 0; i < shifts; ++i) {
+            app_wifi_profile_t first = profiles->entries[0];
+            memmove(&profiles->entries[0], &profiles->entries[1],
+                    (profiles->count - 1) * sizeof(profiles->entries[0]));
+            profiles->entries[profiles->count - 1] = first;
+        }
+        profiles->last_index = 0;
+    }
+    if (legacy_present || duplicates_removed || order_migration_needed) {
         esp_err_t save_err = save_wifi_profiles(profiles);
         if (save_err != ESP_OK) {
             ESP_LOGW(TAG, "WLAN-Profile konnten nicht bereinigt werden: %s",
@@ -588,6 +617,9 @@ static esp_err_t save_wifi_profiles(const app_wifi_profiles_t *profiles)
         }
     }
     if (err == ESP_OK) {
+        err = nvs_set_u8(handle, NVS_KEY_WIFI_ORDERED, 1);
+    }
+    if (err == ESP_OK) {
         err = nvs_commit(handle);
     }
     nvs_close(handle);
@@ -608,24 +640,49 @@ esp_err_t app_config_save_wifi(const app_config_t *config)
            strcmp(profiles.entries[index].ssid, config->wifi_ssid) != 0) {
         ++index;
     }
-    if (index < profiles.count) {
-        for (uint8_t i = index; i + 1 < profiles.count; ++i) {
-            profiles.entries[i] = profiles.entries[i + 1];
-        }
+    if (index == profiles.count && profiles.count == APP_WIFI_PROFILE_MAX_COUNT) {
         index = profiles.count - 1;
-    } else if (profiles.count == APP_WIFI_PROFILE_MAX_COUNT) {
-        for (uint8_t i = 0; i + 1 < profiles.count; ++i) {
-            profiles.entries[i] = profiles.entries[i + 1];
+        if (profiles.last_index == index) {
+            profiles.last_index = 0;
         }
-        index = profiles.count - 1;
-    } else {
+    } else if (index == profiles.count) {
         index = profiles.count++;
     }
     app_wifi_profile_t *profile = &profiles.entries[index];
     memcpy(profile->ssid, config->wifi_ssid, sizeof(profile->ssid));
     memcpy(profile->username, config->wifi_username, sizeof(profile->username));
     memcpy(profile->password, config->wifi_password, sizeof(profile->password));
-    profiles.last_index = index;
+    return save_wifi_profiles(&profiles);
+}
+
+esp_err_t app_wifi_profiles_move(const char *ssid, int8_t direction)
+{
+    if (ssid == NULL || (direction != -1 && direction != 1)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    app_wifi_profiles_t profiles;
+    if (!app_wifi_profiles_load(&profiles)) {
+        return ESP_FAIL;
+    }
+    uint8_t index = 0;
+    while (index < profiles.count && strcmp(profiles.entries[index].ssid, ssid) != 0) {
+        ++index;
+    }
+    if (index == profiles.count) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    int target = (int) index + direction;
+    if (target < 0 || target >= profiles.count) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    app_wifi_profile_t moved = profiles.entries[index];
+    profiles.entries[index] = profiles.entries[target];
+    profiles.entries[target] = moved;
+    if (profiles.last_index == index) {
+        profiles.last_index = target;
+    } else if (profiles.last_index == target) {
+        profiles.last_index = index;
+    }
     return save_wifi_profiles(&profiles);
 }
 
@@ -764,6 +821,24 @@ esp_err_t app_config_save_build_effect(app_build_effect_t effect)
         return err;
     }
     err = nvs_set_u8(nvs_handle, NVS_KEY_BUILD_EFFECT, (uint8_t) effect);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs_handle);
+    }
+    nvs_close(nvs_handle);
+    return err;
+}
+
+esp_err_t app_config_save_cpu_mode(app_cpu_mode_t mode)
+{
+    if (mode >= APP_CPU_MODE_COUNT) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(SETTINGS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_set_u8(nvs_handle, NVS_KEY_CPU_MODE, (uint8_t) mode);
     if (err == ESP_OK) {
         err = nvs_commit(nvs_handle);
     }

@@ -7,6 +7,9 @@
 .directory
 
 # Temporary files
+# Local signing keys and device flash backups must never be committed.
+/secrets/
+/.local_backups/
 *~
 *.swp
 *.swo
@@ -54,6 +57,8 @@ CTestTestfile.cmake
 __pycache__/
 *.egg-info/
 dist/
+node_modules/
+/web-flasher/vendor/
 
 # Virtual environment folders
 venv/

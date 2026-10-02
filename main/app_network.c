@@ -1,6 +1,9 @@
-#include "app_config.h"
+/* Retain the connection address when other components compile warnings only. */
+#define LOG_LOCAL_LEVEL ESP_LOG_INFO
 
-#include <stdlib.h>
+#include "app_config.h"
+#include "app_cpu.h"
+
 #include <string.h>
 
 #include "esp_event.h"
@@ -13,6 +16,7 @@
 
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAILED_BIT BIT1
+#define WIFI_STOPPING_BIT BIT2
 #define WIFI_MAXIMUM_RETRIES 5
 #define WIFI_CONNECTION_TIMEOUT_MS 30000
 #define WIFI_RETRY_PAUSE_MS 2000
@@ -23,6 +27,8 @@ static esp_netif_t *s_wifi_sta_netif;
 static int s_wifi_retry_count;
 static bool s_wifi_enterprise_enabled;
 static bool s_wifi_had_ip;
+static bool s_wifi_reconnecting;
+static uint8_t s_wifi_last_disconnect_reason;
 
 static const char *wifi_disconnect_reason_name(uint8_t reason)
 {
@@ -54,136 +60,6 @@ static const char *wifi_disconnect_reason_name(uint8_t reason)
     }
 }
 
-static const char *wifi_authmode_name(wifi_auth_mode_t authmode)
-{
-    switch (authmode) {
-    case WIFI_AUTH_OPEN:
-        return "offen";
-    case WIFI_AUTH_WEP:
-        return "WEP";
-    case WIFI_AUTH_WPA_PSK:
-        return "WPA-PSK";
-    case WIFI_AUTH_WPA2_PSK:
-        return "WPA2-PSK";
-    case WIFI_AUTH_WPA_WPA2_PSK:
-        return "WPA/WPA2-PSK";
-    case WIFI_AUTH_ENTERPRISE:
-        return "WPA2-Enterprise (802.1X)";
-    case WIFI_AUTH_WPA3_PSK:
-        return "WPA3-PSK";
-    case WIFI_AUTH_WPA2_WPA3_PSK:
-        return "WPA2/WPA3-PSK";
-    case WIFI_AUTH_WAPI_PSK:
-        return "WAPI-PSK";
-    case WIFI_AUTH_OWE:
-        return "OWE (Enhanced Open)";
-    case WIFI_AUTH_WPA3_ENT_192:
-        return "WPA3-Enterprise 192 Bit";
-    case WIFI_AUTH_DPP:
-        return "DPP";
-    case WIFI_AUTH_WPA3_ENTERPRISE:
-        return "WPA3-Enterprise";
-    case WIFI_AUTH_WPA2_WPA3_ENTERPRISE:
-        return "WPA2/WPA3-Enterprise";
-    case WIFI_AUTH_WPA_ENTERPRISE:
-        return "WPA-Enterprise";
-    case WIFI_AUTH_UNKNOWN:
-        return "unbekannt oder ungueltig";
-    default:
-        return "unbekannt";
-    }
-}
-
-static const char *wifi_cipher_name(wifi_cipher_type_t cipher)
-{
-    switch (cipher) {
-    case WIFI_CIPHER_TYPE_NONE:
-        return "keiner";
-    case WIFI_CIPHER_TYPE_WEP40:
-        return "WEP40";
-    case WIFI_CIPHER_TYPE_WEP104:
-        return "WEP104";
-    case WIFI_CIPHER_TYPE_TKIP:
-        return "TKIP";
-    case WIFI_CIPHER_TYPE_CCMP:
-        return "CCMP";
-    case WIFI_CIPHER_TYPE_TKIP_CCMP:
-        return "TKIP/CCMP";
-    case WIFI_CIPHER_TYPE_GCMP:
-        return "GCMP";
-    case WIFI_CIPHER_TYPE_GCMP256:
-        return "GCMP256";
-    case WIFI_CIPHER_TYPE_UNKNOWN:
-        return "unbekannt";
-    default:
-        return "sonstiger";
-    }
-}
-
-static void log_target_wifi_security(const char *target_ssid)
-{
-    uint8_t ssid[APP_WIFI_SSID_MAX_LENGTH + 1] = {0};
-    size_t ssid_length = strlen(target_ssid);
-    memcpy(ssid, target_ssid, ssid_length);
-
-    wifi_scan_config_t scan_config = {
-        .ssid = ssid,
-        .show_hidden = true,
-        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
-        .scan_time.active = {
-            .min = 100,
-            .max = 300,
-        },
-    };
-    esp_err_t err = esp_wifi_scan_start(&scan_config, true);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Diagnose-Scan fuer SSID '%s' fehlgeschlagen: %s", target_ssid,
-                 esp_err_to_name(err));
-        return;
-    }
-
-    uint16_t ap_count = 0;
-    err = esp_wifi_scan_get_ap_num(&ap_count);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Anzahl der Diagnose-Scan-Ergebnisse konnte nicht gelesen werden: %s",
-                 esp_err_to_name(err));
-        return;
-    }
-    if (ap_count == 0) {
-        ESP_LOGW(TAG, "Diagnose-Scan: SSID '%s' wurde nicht gefunden", target_ssid);
-        return;
-    }
-
-    wifi_ap_record_t *ap_records = calloc(ap_count, sizeof(*ap_records));
-    if (ap_records == NULL) {
-        ESP_LOGW(TAG, "Diagnose-Scan: nicht genug Speicher fuer %u Ergebnisse", ap_count);
-        esp_wifi_clear_ap_list();
-        return;
-    }
-
-    uint16_t record_count = ap_count;
-    err = esp_wifi_scan_get_ap_records(&record_count, ap_records);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Diagnose-Scan-Ergebnisse konnten nicht gelesen werden: %s",
-                 esp_err_to_name(err));
-        free(ap_records);
-        return;
-    }
-
-    for (uint16_t i = 0; i < record_count; ++i) {
-        ESP_LOGW(TAG, "Diagnose-Scan: SSID '%s', BSSID %02x:%02x:%02x:%02x:%02x:%02x, "
-                 "Kanal %u, RSSI %d dBm, Sicherheit %s (%d), Pairwise-Cipher %s, "
-                 "Group-Cipher %s", target_ssid,
-                 ap_records[i].bssid[0], ap_records[i].bssid[1], ap_records[i].bssid[2],
-                 ap_records[i].bssid[3], ap_records[i].bssid[4], ap_records[i].bssid[5],
-                 ap_records[i].primary, ap_records[i].rssi,
-                 wifi_authmode_name(ap_records[i].authmode), ap_records[i].authmode,
-                 wifi_cipher_name(ap_records[i].pairwise_cipher),
-                 wifi_cipher_name(ap_records[i].group_cipher));
-    }
-    free(ap_records);
-}
-
 void app_network_init(void)
 {
     ESP_ERROR_CHECK(esp_netif_init());
@@ -194,7 +70,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        ESP_LOGI(TAG, "WLAN-Station gestartet; erster Verbindungsversuch");
+        if (xEventGroupGetBits(s_wifi_event_group) & WIFI_STOPPING_BIT) {
+            return;
+        }
         esp_err_t err = esp_wifi_connect();
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "Erster WLAN-Verbindungsversuch konnte nicht gestartet werden: %s",
@@ -202,30 +80,27 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAILED_BIT);
         }
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        if (xEventGroupGetBits(s_wifi_event_group) & WIFI_STOPPING_BIT) {
+            return;
+        }
         const wifi_event_sta_disconnected_t *disconnection = event_data;
         if (disconnection != NULL) {
-            ESP_LOGW(TAG, "WLAN getrennt: Grund %u (%s), SSID '%.*s', "
-                     "BSSID %02x:%02x:%02x:%02x:%02x:%02x, RSSI %d dBm",
-                     disconnection->reason, wifi_disconnect_reason_name(disconnection->reason),
-                     (int) disconnection->ssid_len, disconnection->ssid,
-                     disconnection->bssid[0], disconnection->bssid[1],
-                     disconnection->bssid[2], disconnection->bssid[3],
-                     disconnection->bssid[4], disconnection->bssid[5],
-                     disconnection->rssi);
-        } else {
-            ESP_LOGW(TAG, "WLAN getrennt; der Treiber lieferte keinen Abbruchgrund");
+            s_wifi_last_disconnect_reason = disconnection->reason;
         }
-        xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
         if (s_wifi_had_ip) {
-            ESP_LOGW(TAG, "WLAN nach erfolgreicher Verbindung verloren; verbinde erneut");
+            if (!s_wifi_reconnecting) {
+                ESP_LOGW(TAG, "WLAN-Verbindung verloren: Grund %u (%s); verbinde erneut",
+                         s_wifi_last_disconnect_reason,
+                         wifi_disconnect_reason_name(s_wifi_last_disconnect_reason));
+                s_wifi_reconnecting = true;
+            }
             esp_err_t err = esp_wifi_connect();
             if (err != ESP_OK) {
                 ESP_LOGE(TAG, "WLAN-Wiederverbindung konnte nicht gestartet werden: %s",
                          esp_err_to_name(err));
             }
         } else if (s_wifi_retry_count < WIFI_MAXIMUM_RETRIES) {
-            ESP_LOGI(TAG, "WLAN-Verbindungsversuch %d von %d",
-                     s_wifi_retry_count + 2, WIFI_MAXIMUM_RETRIES + 1);
             esp_err_t err = esp_wifi_connect();
             if (err == ESP_OK) {
                 s_wifi_retry_count++;
@@ -235,26 +110,15 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                 xEventGroupSetBits(s_wifi_event_group, WIFI_FAILED_BIT);
             }
         } else {
-            ESP_LOGW(TAG, "WLAN-Verbindung nach %d Versuchen noch nicht hergestellt",
-                     WIFI_MAXIMUM_RETRIES + 1);
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAILED_BIT);
         }
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
-        const wifi_event_sta_connected_t *connection = event_data;
-        if (connection != NULL) {
-            ESP_LOGI(TAG, "Mit Access Point verbunden: SSID '%.*s', "
-                     "BSSID %02x:%02x:%02x:%02x:%02x:%02x, Kanal %u, Sicherheitsmodus %d",
-                     (int) connection->ssid_len, connection->ssid,
-                     connection->bssid[0], connection->bssid[1], connection->bssid[2],
-                     connection->bssid[3], connection->bssid[4], connection->bssid[5],
-                     connection->channel, connection->authmode);
-        }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        if (xEventGroupGetBits(s_wifi_event_group) & WIFI_STOPPING_BIT) {
+            return;
+        }
         const ip_event_got_ip_t *got_ip = event_data;
         if (got_ip != NULL) {
-            ESP_LOGI(TAG, "DHCP erfolgreich: IP " IPSTR ", Gateway " IPSTR ", Netzmaske " IPSTR,
-                     IP2STR(&got_ip->ip_info.ip), IP2STR(&got_ip->ip_info.gw),
-                     IP2STR(&got_ip->ip_info.netmask));
+            ESP_LOGI(TAG, "WLAN verbunden: IP " IPSTR, IP2STR(&got_ip->ip_info.ip));
         }
         esp_err_t ipv6_err = esp_netif_create_ip6_linklocal(s_wifi_sta_netif);
         if (ipv6_err != ESP_OK) {
@@ -263,6 +127,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         }
         s_wifi_retry_count = 0;
         s_wifi_had_ip = true;
+        s_wifi_reconnecting = false;
         xEventGroupClearBits(s_wifi_event_group, WIFI_FAILED_BIT);
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
@@ -347,17 +212,14 @@ bool app_connect_to_wifi(const app_config_t *config, uint32_t timeout_ms)
     if (use_enterprise) {
         wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_ENTERPRISE;
         wifi_config.sta.pmf_cfg.capable = true;
-        ESP_LOGI(TAG, "Verbinde mit SSID '%s' (WPA2-Enterprise, Benutzername hinterlegt)",
-                 config->wifi_ssid);
     } else {
         memcpy(wifi_config.sta.password, config->wifi_password,
                strlen(config->wifi_password));
-        /* Permit open networks as well as password-protected ones. The Wi-Fi
-         * stack still verifies the supplied password when the selected AP needs
-         * one. */
+        /* With no password, also permit Enhanced Open (OWE). OWE has to be
+         * enabled per station even when support is compiled into ESP-IDF.
+         * The OPEN threshold also allows plain open and OWE transition APs. */
         wifi_config.sta.threshold.authmode = WIFI_AUTH_OPEN;
-        ESP_LOGI(TAG, "Verbinde mit SSID '%s' (%s)", config->wifi_ssid,
-                 config->wifi_password[0] == '\0' ? "ohne Passwort" : "Passwort hinterlegt");
+        wifi_config.sta.owe_enabled = config->wifi_password[0] == '\0';
     }
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -366,8 +228,9 @@ bool app_connect_to_wifi(const app_config_t *config, uint32_t timeout_ms)
         return false;
     }
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
-    ESP_LOGI(TAG, "WLAN-Energiesparmodus deaktiviert fuer kurze HTTP-Reaktionszeit");
+    app_cpu_mode_t cpu_mode = app_cpu_current_mode();
+    bool automatic_cpu = cpu_mode == APP_CPU_MODE_AUTO_160 || cpu_mode == APP_CPU_MODE_AUTO_240;
+    ESP_ERROR_CHECK(esp_wifi_set_ps(automatic_cpu ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE));
 
     TickType_t started = xTaskGetTickCount();
     TickType_t timeout_ticks = pdMS_TO_TICKS(timeout_ms == 0 ?
@@ -399,8 +262,6 @@ bool app_connect_to_wifi(const app_config_t *config, uint32_t timeout_ms)
         if (remaining <= pause) {
             break;
         }
-        ESP_LOGI(TAG, "WLAN noch nicht verbunden; erneuter Versuch in %u ms",
-                 WIFI_RETRY_PAUSE_MS);
         vTaskDelay(pause);
         if (xEventGroupGetBits(s_wifi_event_group) & WIFI_CONNECTED_BIT) {
             connected = true;
@@ -418,14 +279,17 @@ bool app_connect_to_wifi(const app_config_t *config, uint32_t timeout_ms)
         connected = true;
     }
     if (!connected) {
-        ESP_LOGW(TAG, "Keine WLAN-IP fuer SSID '%s' nach %lu ms",
-                 config->wifi_ssid,
-                 (unsigned long) (timeout_ms == 0 ? WIFI_CONNECTION_TIMEOUT_MS : timeout_ms));
+        unsigned long elapsed_ms = timeout_ms == 0 ? WIFI_CONNECTION_TIMEOUT_MS : timeout_ms;
         wifi_ap_record_t connected_ap;
         if (esp_wifi_sta_get_ap_info(&connected_ap) == ESP_OK) {
-            ESP_LOGW(TAG, "Access Point ist verbunden, aber DHCP hat noch keine IP geliefert");
+            ESP_LOGW(TAG, "WLAN '%s': keine DHCP-IP nach %lu ms", config->wifi_ssid, elapsed_ms);
         } else {
-            log_target_wifi_security(config->wifi_ssid);
+            ESP_LOGW(TAG, "WLAN '%s' nach %lu ms nicht verbunden: Grund %u (%s)",
+                     config->wifi_ssid, elapsed_ms, s_wifi_last_disconnect_reason,
+                     wifi_disconnect_reason_name(s_wifi_last_disconnect_reason));
+            /* The caller stops Wi-Fi before trying another profile. */
+            xEventGroupSetBits(s_wifi_event_group, WIFI_STOPPING_BIT);
+            xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
         }
         connected = (xEventGroupGetBits(s_wifi_event_group) & WIFI_CONNECTED_BIT) != 0;
     }
@@ -457,4 +321,6 @@ void app_stop_wifi(void)
     s_wifi_event_group = NULL;
     s_wifi_retry_count = 0;
     s_wifi_had_ip = false;
+    s_wifi_reconnecting = false;
+    s_wifi_last_disconnect_reason = 0;
 }
