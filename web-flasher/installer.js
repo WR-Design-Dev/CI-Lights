@@ -18,7 +18,7 @@ const release = document.querySelector('#release-link');
 const lightPreview = document.querySelector('#traffic-light-preview');
 const lightPhases = [
   {lights: ['red'], duration: 3000},
-  {lights: ['red', 'yellow'], duration: 900},
+  {lights: ['yellow'], duration: 900},
   {lights: ['green'], duration: 3000},
   {lights: ['yellow'], duration: 900},
 ];
