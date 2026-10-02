@@ -1,42 +1,43 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <title>Datenschutzhinweise · CI-Lights</title>
+  <title data-i18n="privacyPageTitle">Privacy notice · CI-Lights</title>
   <link rel="stylesheet" href="styles.css">
+  <script type="module" src="language-init.js"></script>
 </head>
 <body>
   <main>
-    <header class="brand"><a href="index.html">CI-Lights</a><span>Open Source · ESP32-S3</span></header>
+    <header class="brand"><a href="index.html">CI-Lights</a><div class="header-tools"><span class="project-tag">Open Source · ESP32-S3</span><div class="language-switch" role="group" aria-label="Language" data-i18n-aria-label="languageLabel"><button type="button" data-language="de" aria-label="German" title="German" data-i18n-aria-label="germanLanguage" data-i18n-title="germanLanguage" aria-pressed="false" disabled><svg class="flag" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="12" fill="#000"/><rect y="12" width="60" height="12" fill="#dd0000"/><rect y="24" width="60" height="12" fill="#ffce00"/></svg></button><button type="button" data-language="en" aria-label="English" title="English" data-i18n-aria-label="englishLanguage" data-i18n-title="englishLanguage" aria-pressed="true" disabled><svg class="flag" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="36" fill="#012169"/><path d="M0 0L60 36M60 0L0 36" stroke="#fff" stroke-width="12"/><path d="M0 0L60 36M60 0L0 36" stroke="#c8102e" stroke-width="4"/><path d="M30 0V36M0 18H60" stroke="#fff" stroke-width="12"/><path d="M30 0V36M0 18H60" stroke="#c8102e" stroke-width="6"/></svg></button></div></div></header>
     <article class="legal">
-      <p class="eyebrow">Stand: 2. Oktober 2026</p>
-      <h1>Datenschutzhinweise</h1>
-      <p>Diese Website stellt Firmware und eine USB-Installation für CI-Lights bereit. Die folgenden Hinweise beschreiben die Datenverarbeitung auf dieser Website.</p>
-      <h2>1. Verantwortlicher</h2>
-      <address>Wanja Relitzki<br>Oldekopstraße 60<br>30659 Hannover<br>Deutschland</address>
-      <p>E-Mail: <a href="mailto:wanja_relitzki@hotmail.com">wanja_relitzki@hotmail.com</a></p>
-      <h2>2. Bereitstellung über GitHub Pages</h2>
-      <p>Die Seite und die Firmware-Dateien werden über GitHub Pages ausgeliefert. Beim Abruf verarbeitet GitHub technische Verbindungsdaten wie IP-Adresse, Zeitpunkt, angeforderte Datei sowie Browser- und HTTP-Informationen. Das ermöglicht die Auslieferung und den Schutz vor Missbrauch. Grundlage für die Einbindung ist Art. 6 Abs. 1 lit. f DSGVO; das berechtigte Interesse besteht in einer verfügbaren und sicheren Bereitstellung dieses Projekts.</p>
-      <p>Empfänger ist GitHub, Inc., 88 Colin P. Kelly Jr. St., San Francisco, CA 94107, USA. GitHub verarbeitet Daten auch in den USA und anderen Ländern und nennt insbesondere EU-Standardvertragsklauseln als Schutz für internationale Übermittlungen. Informationen zu Schutzmaßnahmen, Verarbeitung und Speicherdauer enthält die <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub-Datenschutzerklärung</a>. Der Betreiber hat keinen Zugriff auf GitHubs Server-Protokolle und legt deren Aufbewahrungsdauer nicht fest.</p>
-      <h2>3. esptool-js von UNPKG</h2>
-      <p>Erst wenn du „Ampel per USB verbinden“ anklickst und einen USB-Port auswählst, lädt dein Browser Espressifs Flash-Bibliothek esptool-js in der festgelegten Version 0.6.1 von unpkg.com. Dabei werden die IP-Adresse und technische Angaben zur HTTP-Anfrage an UNPKG beziehungsweise dessen CDN übertragen. Grundlage ist Art. 6 Abs. 1 lit. f DSGVO; das berechtigte Interesse ist die Bereitstellung der von dir gestarteten Flash-Funktion. Ohne diese Verbindung ist die USB-Installation auf dieser Seite nicht möglich.</p>
-      <p><a href="https://unpkg.com/">UNPKG</a> nutzt das globale Netzwerk von Cloudflare, Inc., 101 Townsend St., San Francisco, CA 94107, USA. Verarbeitung kann auch in den USA erfolgen. Cloudflare nennt das EU-US Data Privacy Framework und für weitere Übermittlungen Standardvertragsklauseln als Schutzmaßnahmen. Details und Angaben zur Aufbewahrung stehen in der <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare-Datenschutzerklärung</a>. Der Betreiber erhält diese Verbindungsdaten nicht und bestimmt die Protokoll-Aufbewahrung der Anbieter nicht.</p>
-      <h2>4. USB-Kommunikation und Einstellungen</h2>
-      <p>Nach deiner Port-Freigabe kommuniziert der Browser lokal über Web Serial mit dem ESP32. Die Flash-Funktion überträgt Firmware auf das angeschlossene Gerät. Sie lädt keine Geräteprotokolle, MAC-Adressen, WLAN-Passwörter oder Jenkins-Zugangsdaten auf einen Server hoch. Port-Freigaben verwaltet dein Browser; du kannst sie dort widerrufen.</p>
-      <p>Die Seite liest keine gespeicherten Einstellungen aus. Ohne aktivierte Löschoption werden die Bereiche für Einstellungen und Branding beim Schreiben ausgespart. „Alle Gerätedaten löschen“ leert den Flash vor der Installation. Mit „Gerät löschen“ lässt sich der gesamte Flash ohne Installation leeren. Beides erfordert deine Bestätigung. Downloads und Verbindungsdaten werden wie in Abschnitt 2 und 3 beschrieben verarbeitet.</p>
-      <h2>5. Cookies, Analyse und lokale Speicherung</h2>
-      <p>Diese Website setzt selbst keine Cookies und verwendet keine Analyse- oder Werbedienste, externen Schriftarten oder Browser-Speicher zur Besuchererfassung. Die Flash-Bibliothek wird erst beim Verbinden geladen. Es erfolgt keine Profilbildung durch den Betreiber. Technischer Browser-Cache und Web-Serial-Berechtigungen werden vom Browser verwaltet.</p>
-      <h2>6. E-Mail und externe Links</h2>
-      <p>Ein E-Mail-Link öffnet dein E-Mail-Programm. Erst wenn du die Nachricht versendest, werden die darin enthaltenen Daten über deinen E-Mail-Anbieter übertragen. Der Betreiber verarbeitet Absenderadresse und Inhalt zur Beantwortung auf Grundlage von Art. 6 Abs. 1 lit. f DSGVO beziehungsweise bei einer vertragsbezogenen Anfrage Art. 6 Abs. 1 lit. b DSGVO. Nachrichten werden gelöscht, sobald die Bearbeitung abgeschlossen ist und keine Aufbewahrungspflicht oder sonstige Erforderlichkeit mehr besteht.</p>
-      <p>Externe Links werden erst beim Anklicken geöffnet. Auf der Zielseite gelten die Hinweise des jeweiligen Anbieters; dieser erhält dabei technische Verbindungsdaten.</p>
-      <h2>7. Deine Rechte</h2>
-      <p>Unter den gesetzlichen Voraussetzungen hast du Rechte auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung und Datenübertragbarkeit. Wende dich dazu an den oben genannten Kontakt. <strong>Verarbeitungen aufgrund berechtigter Interessen kannst du aus Gründen deiner besonderen Situation widersprechen (Art. 21 DSGVO).</strong></p>
-      <p>Du kannst dich bei einer Datenschutzaufsichtsbehörde beschweren, insbesondere dem <a href="https://www.lfd.niedersachsen.de/">Landesbeauftragten für den Datenschutz Niedersachsen</a>.</p>
-      <p><a href="index.html">Zurück zur Installation</a></p>
+      <p class="eyebrow" data-i18n="privacy0">Last updated: 2 October 2026</p>
+      <h1 data-i18n="privacy1">Privacy notice</h1>
+      <p data-i18n="privacy2">This website provides firmware and USB installation for CI-Lights. The following information describes how data is processed on this website.</p>
+      <h2 data-i18n="privacy3">1. Controller</h2>
+      <address data-i18n-html="privacy4">Wanja Relitzki<br>Oldekopstraße 60<br>30659 Hannover<br>Germany</address>
+      <p data-i18n-html="privacy5">Email: <a href="mailto:wanja_relitzki@hotmail.com">wanja_relitzki@hotmail.com</a></p>
+      <h2 data-i18n="privacy6">2. Hosting on GitHub Pages</h2>
+      <p data-i18n="privacy7">This website and its firmware files are served through GitHub Pages. When you access them, GitHub processes technical connection data such as your IP address, the time, the requested file, and browser and HTTP information. This enables delivery and protection against abuse. The legal basis for using this service is Article 6(1)(f) GDPR; the legitimate interest is to provide this project reliably and securely.</p>
+      <p data-i18n-html="privacy8">The recipient is GitHub, Inc., 88 Colin P. Kelly Jr. St., San Francisco, CA 94107, USA. GitHub also processes data in the United States and other countries, and cites EU Standard Contractual Clauses in particular as safeguards for international transfers. Details on safeguards, processing and retention are in the <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub Privacy Statement</a>. The operator has no access to GitHub’s server logs and does not determine how long they are retained.</p>
+      <h2 data-i18n="privacy9">3. esptool-js from UNPKG</h2>
+      <p data-i18n="privacy10">Only after you click “Connect device via USB” and select a USB port does your browser load Espressif’s esptool-js flash library, pinned to version 0.6.1, from unpkg.com. Your IP address and technical HTTP request details are transmitted to UNPKG or its CDN. The legal basis is Article 6(1)(f) GDPR; the legitimate interest is to provide the flash function you requested. Without this connection, USB installation on this website is not possible.</p>
+      <p data-i18n-html="privacy11"><a href="https://unpkg.com/">UNPKG</a> uses the global network of Cloudflare, Inc., 101 Townsend St., San Francisco, CA 94107, USA. Processing may also take place in the United States. Cloudflare cites the EU-US Data Privacy Framework and Standard Contractual Clauses for other transfers as safeguards. Details and retention information are in the <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare Privacy Policy</a>. The operator does not receive this connection data and does not determine the providers’ log retention periods.</p>
+      <h2 data-i18n="privacy12">4. USB communication and settings</h2>
+      <p data-i18n="privacy13">After you grant access to a port, your browser communicates locally with the ESP32 using Web Serial. The flash function transfers firmware to the connected device. It does not upload device logs, MAC addresses, Wi-Fi passwords or Jenkins credentials to a server. Your browser manages port permissions; you can revoke them there.</p>
+      <p data-i18n="privacy14">The website does not read saved settings. When the erase option is unchecked, the settings and branding regions are excluded from writing. “Erase all device data” clears the flash before installation. “Erase device” clears the entire flash without installation. Both require your confirmation. Downloads and connection data are processed as described in Sections 2 and 3.</p>
+      <h2 data-i18n="privacy15">5. Cookies, analytics and local storage</h2>
+      <p data-i18n="privacy16">This website itself sets no cookies and uses no analytics or advertising services, external fonts or browser storage to track visits. The flash library is only loaded when connecting. The operator does not create profiles. Your browser manages its technical cache and Web Serial permissions.</p>
+      <h2 data-i18n="privacy17">6. Email and external links</h2>
+      <p data-i18n="privacy18">An email link opens your email application. Only when you send the message are its contents transmitted through your email provider. The operator processes your sender address and message to reply, based on Article 6(1)(f) GDPR or, for contract-related enquiries, Article 6(1)(b) GDPR. Messages are deleted once the enquiry has been resolved and no retention obligation or other necessity remains.</p>
+      <p data-i18n="privacy19">External links are opened only when you click them. The destination provider’s privacy notices apply on that website; it receives technical connection data when you visit.</p>
+      <h2 data-i18n="privacy20">7. Your rights</h2>
+      <p data-i18n-html="privacy21">Subject to the applicable legal conditions, you have rights of access, rectification, erasure, restriction of processing and data portability. To exercise them, contact the controller above. <strong>You may object to processing based on legitimate interests on grounds relating to your particular situation (Article 21 GDPR).</strong></p>
+      <p data-i18n-html="privacy22">You may lodge a complaint with a data protection supervisory authority, in particular the <a href="https://www.lfd.niedersachsen.de/">State Commissioner for Data Protection of Lower Saxony</a>.</p>
+      <p data-i18n-html="privacy23"><a href="index.html">Back to installation</a></p>
     </article>
-    <footer><span>CI-Lights</span><a href="index.html">Installation</a><a href="https://github.com/WR-Design-Dev/CI-Lights">Quellcode auf GitHub</a><a href="impressum.html">Impressum</a><a href="datenschutz.html" aria-current="page">Datenschutz</a></footer>
+    <footer><span>CI-Lights</span><a href="index.html" data-i18n="installLink">Installation</a><a href="https://github.com/WR-Design-Dev/CI-Lights" data-i18n="sourceLink">Source on GitHub</a><a href="impressum.html" data-i18n="legalLink">Legal notice</a><a href="datenschutz.html" aria-current="page" data-i18n="privacyLink">Privacy</a></footer>
   </main>
 </body>
 </html>

@@ -1,3 +1,5 @@
+import {localizedError} from './language.mjs';
+
 const PARTS = [
   {offset: 0, name: 'bootloader.bin', limit: 0x8000},
   {offset: 0x8000, name: 'partition-table.bin', limit: 0x1000},
@@ -10,7 +12,7 @@ export function validateManifest(manifest, manifestUrl) {
       !/^1\.0\.\d+$/.test(manifest.version) || manifest.builds?.length !== 1 ||
       manifest.builds[0].chipFamily !== 'ESP32-S3' || manifest.builds[0].parts?.length !== 4 ||
       manifest.release_url !== `https://github.com/WR-Design-Dev/CI-Lights/releases/tag/v${manifest.version}`) {
-    throw new Error('Die Firmware-Informationen passen nicht zu dieser Ampel.');
+    throw localizedError('manifestMismatch');
   }
   const parts = manifest.builds[0].parts.map((part, index) => {
     const expected = PARTS[index];
@@ -20,7 +22,7 @@ export function validateManifest(manifest, manifestUrl) {
         !Number.isSafeInteger(part.size) || part.size <= 0 || part.size > expected.limit ||
         !/^[0-9a-f]{64}$/.test(part.sha256) ||
         (index === 2 && part.size !== 8192) || (index === 3 && part.size % 4096 !== 0)) {
-      throw new Error('Ungültige Firmware-Datei oder Flash-Adresse.');
+      throw localizedError('invalidPart');
     }
     return {...part, url: url.href};
   });
@@ -31,12 +33,12 @@ export async function downloadFiles(manifest) {
   const files = [];
   for (const part of manifest.parts) {
     const response = await fetch(part.url, {cache: 'no-store', signal: AbortSignal.timeout(30000)});
-    if (!response.ok) throw new Error(`Firmware-Datei konnte nicht geladen werden (HTTP ${response.status}).`);
+    if (!response.ok) throw localizedError('downloadFailed', {status: response.status});
     const data = new Uint8Array(await response.arrayBuffer());
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
     const sha256 = Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
     if (data.length !== part.size || sha256 !== part.sha256) {
-      throw new Error('Firmware-Prüfsumme oder Dateigröße stimmt nicht. Es wurde nichts geschrieben oder gelöscht.');
+      throw localizedError('checksumMismatch');
     }
     files.push({data, address: part.offset});
   }
@@ -44,12 +46,12 @@ export async function downloadFiles(manifest) {
 }
 
 export async function checkDevice(loader) {
-  if (loader.chip?.CHIP_NAME !== 'ESP32-S3') throw new Error('Diese Firmware benötigt einen ESP32-S3.');
+  if (loader.chip?.CHIP_NAME !== 'ESP32-S3') throw localizedError('wrongChip');
   // Do not use detectFlashSize(): it defaults to 4MB for unknown chips.
   const id = await loader.readFlashId();
   const size = loader.DETECTED_FLASH_SIZES[(id >>> 16) & 0xff];
   if (!size || loader.flashSizeBytes(size) < 4 * 1024 * 1024) {
-    throw new Error('Mindestens 4 MiB Flash müssen sicher erkannt werden.');
+    throw localizedError('insufficientFlash');
   }
   return size;
 }

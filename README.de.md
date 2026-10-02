@@ -16,6 +16,8 @@ Bei einem erneuten USB-Flash die Loeschoption deaktiviert lassen, um Einstellung
 und Branding zu behalten. Die Erstinstallation des OTA-Partitionslayouts erfolgt
 einmal per USB; die bisherige Firmware kann diese Umstellung nicht per WLAN vornehmen.
 Die eigene Flash-Seite nutzt esptool-js 0.6.1 von UNPKG erst nach dem Verbinden.
+Englisch ist die Standardsprache; die Flaggen **EN** und **DE** im Seitenkopf
+schalten die gesamte Flash-Seite inklusive Meldungen und Rechtstexten um.
 Mit **Geraet loeschen** kannst du nach Bestaetigung den gesamten Flash auch ohne
 Installation leeren. Impressum und Datenschutz sind im Seitenfuss verlinkt.
 

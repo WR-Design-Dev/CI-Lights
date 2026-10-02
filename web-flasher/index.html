@@ -1,52 +1,52 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <meta name="description" content="Installiere CI-Lights auf deinem ESP32-S3 direkt im Browser. Spätere Updates startest du über die Ampel-Verwaltung.">
-  <title>CI-Lights installieren</title>
+  <meta name="description" content="Install CI-Lights on your ESP32-S3 directly in your browser. Start future updates from device administration." data-i18n-content="pageDescription">
+  <title data-i18n="pageTitle">Install CI-Lights</title>
   <link rel="stylesheet" href="styles.css">
   <script type="module" src="installer.js"></script>
 </head>
 <body>
   <main>
-    <header class="brand"><a href="https://github.com/WR-Design-Dev/CI-Lights">CI-Lights</a><span>Open Source · ESP32-S3</span></header>
+    <header class="brand"><a href="https://github.com/WR-Design-Dev/CI-Lights">CI-Lights</a><div class="header-tools"><span class="project-tag">Open Source · ESP32-S3</span><div class="language-switch" role="group" aria-label="Language" data-i18n-aria-label="languageLabel"><button type="button" data-language="de" aria-label="German" title="German" data-i18n-aria-label="germanLanguage" data-i18n-title="germanLanguage" aria-pressed="false" disabled><svg class="flag" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="12" fill="#000"/><rect y="12" width="60" height="12" fill="#dd0000"/><rect y="24" width="60" height="12" fill="#ffce00"/></svg></button><button type="button" data-language="en" aria-label="English" title="English" data-i18n-aria-label="englishLanguage" data-i18n-title="englishLanguage" aria-pressed="true" disabled><svg class="flag" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="36" fill="#012169"/><path d="M0 0L60 36M60 0L0 36" stroke="#fff" stroke-width="12"/><path d="M0 0L60 36M60 0L0 36" stroke="#c8102e" stroke-width="4"/><path d="M30 0V36M0 18H60" stroke="#fff" stroke-width="12"/><path d="M30 0V36M0 18H60" stroke="#c8102e" stroke-width="6"/></svg></button></div></div></header>
     <section class="hero" aria-labelledby="title">
       <div class="intro">
-        <p class="eyebrow">Dein Build-Status. Auf einen Blick.</p>
-        <h1 id="title">Bring deine<br>Ampel zum Leuchten.</h1>
-        <p class="lead">Installiere CI-Lights per USB direkt im Browser. Richte danach dein WLAN und Jenkins ein. Spätere Firmware-Updates startest du bequem in der Ampel-Verwaltung.</p>
+        <p class="eyebrow" data-i18n="heroEyebrow">Your build status. At a glance.</p>
+        <h1 id="title" data-i18n-html="heroTitle">Bring your<br>build light to life.</h1>
+        <p class="lead" data-i18n="heroLead">Install CI-Lights via USB directly in your browser. Then set up Wi-Fi and Jenkins. Start future firmware updates from device administration.</p>
         <div class="device-tag">ESP32-S3 · 4 MiB Flash · 2 MiB PSRAM</div>
       </div>
-      <div class="traffic-light" aria-hidden="true"><span class="lamp red"></span><span class="lamp yellow"></span><span class="lamp green"></span><div class="pole"></div><div class="base"></div></div>
+      <aside class="traffic-light" aria-hidden="true"><object id="traffic-light-preview" class="traffic-light-top" data="TrafficLight.svg" type="image/svg+xml" width="128" height="252" aria-hidden="true" tabindex="-1"><img src="TrafficLight.svg" alt="" width="128" height="252"></object><div class="traffic-light-middle"></div><div class="traffic-light-base"></div></aside>
     </section>
     <section class="install-card" aria-labelledby="install-title">
-      <div><p class="eyebrow">Erste Installation</p><h2 id="install-title">Verbinden. Installieren. Fertig.</h2><p>Du brauchst ein USB-Datenkabel und einen Browser mit Web Serial, zum Beispiel Chrome oder Edge auf dem Computer.</p></div>
+      <div><p class="eyebrow" data-i18n="installEyebrow">First installation</p><h2 id="install-title" data-i18n="installTitle">Connect. Install. Ready.</h2><p data-i18n="installRequirements">You need a USB data cable and a browser with Web Serial, such as Chrome or Edge on a computer.</p></div>
       <div class="install-action">
-        <p class="version">Firmware <strong id="firmware-version">wird geladen …</strong></p>
-        <button id="connect" class="install-button" type="button" disabled>Ampel per USB verbinden <span aria-hidden="true">↗</span></button>
+        <p class="version">Firmware <strong id="firmware-version" data-i18n="loading">loading …</strong></p>
+        <button id="connect" class="install-button" type="button" disabled><span data-i18n="connectButton">Connect device via USB</span> <span aria-hidden="true">↗</span></button>
         <div id="flash-controls" hidden>
-          <label class="erase-option"><input id="erase" type="checkbox"> Alle Gerätedaten löschen</label>
-          <p class="erase-help">Ausgeschaltet lassen, um WLAN, Zugangsdaten und Branding zu behalten.</p>
-          <button id="flash" class="install-button" type="button" disabled>Firmware installieren</button>
-          <button id="erase-device" class="secondary-button danger-button" type="button" disabled>Gerät löschen</button>
-          <button id="disconnect" class="secondary-button" type="button" disabled>Verbindung trennen</button>
+          <label class="erase-option"><input id="erase" type="checkbox"> <span data-i18n="eraseOption">Erase all device data</span></label>
+          <p class="erase-help" data-i18n="eraseHelp">Leave unchecked to keep Wi-Fi settings, credentials and branding.</p>
+          <button id="flash" class="install-button" type="button" disabled data-i18n="flashButton">Install firmware</button>
+          <button id="erase-device" class="secondary-button danger-button" type="button" disabled data-i18n="eraseButton">Erase device</button>
+          <button id="disconnect" class="secondary-button" type="button" disabled data-i18n="disconnectButton">Disconnect</button>
         </div>
-        <progress id="flash-progress" max="100" value="0" aria-label="Installationsfortschritt" hidden></progress>
-        <p id="installer-status" class="status" role="status">Firmware-Dateien werden geprüft …</p>
-        <p class="privacy-note">„Verbinden“ lädt esptool-js von unpkg.com. Die USB-Kommunikation erfolgt lokal im Browser. <a href="datenschutz.html">Datenschutzhinweise</a></p>
-        <a id="release-link" href="https://github.com/WR-Design-Dev/CI-Lights/releases" target="_blank" rel="noopener">Versionen und Downloads</a>
+        <progress id="flash-progress" max="100" value="0" aria-label="Installation progress" data-i18n-aria-label="progressLabel" hidden></progress>
+        <p id="installer-status" class="status" role="status" data-i18n="checkingFiles">Checking firmware files …</p>
+        <p class="privacy-note" data-i18n-html="privacyNote">“Connect” loads esptool-js from unpkg.com. USB communication stays local in your browser. <a href="datenschutz.html">Privacy notice</a></p>
+        <a id="release-link" href="https://github.com/WR-Design-Dev/CI-Lights/releases" target="_blank" rel="noopener" data-i18n="releases">Releases and downloads</a>
       </div>
     </section>
-    <section class="steps" aria-label="So funktioniert die Einrichtung">
-      <article><span class="step-number">01</span><h3>Ampel anschließen</h3><p>Verbinde den ESP über ein USB-Datenkabel mit deinem Computer. Schließe vorher einen geöffneten seriellen Monitor.</p></article>
-      <article><span class="step-number">02</span><h3>Firmware installieren</h3><p>Klicke auf „Ampel per USB verbinden“, wähle den USB-Port und starte „Firmware installieren“. Falls keine Verbindung möglich ist: BOOT gedrückt halten, RESET kurz drücken, dann BOOT loslassen und erneut verbinden.</p></article>
-      <article><span class="step-number">03</span><h3>WLAN und Jenkins einrichten</h3><p>Nach dem Neustart zeigt die Ampel den LED-Code für das Einrichtungs-WLAN. Verbinde dich damit und öffne das Einrichtungsportal.</p></article>
+    <section class="steps" aria-label="Setup instructions" data-i18n-aria-label="stepsLabel">
+      <article><span class="step-number">01</span><h3 data-i18n="stepOneTitle">Connect your device</h3><p data-i18n="stepOneText">Connect the ESP to your computer using a USB data cable. Close any open serial monitor first.</p></article>
+      <article><span class="step-number">02</span><h3 data-i18n="stepTwoTitle">Install firmware</h3><p data-i18n="stepTwoText">Click “Connect device via USB”, select the USB port and choose “Install firmware”. If connecting fails: hold BOOT, briefly press RESET, release BOOT and try again.</p></article>
+      <article><span class="step-number">03</span><h3 data-i18n="stepThreeTitle">Set up Wi-Fi and Jenkins</h3><p data-i18n="stepThreeText">After restarting, the build light displays an LED code for its setup Wi-Fi network. Connect to that network and open the setup portal.</p></article>
     </section>
-    <section class="next-update"><div class="update-icon" aria-hidden="true">↻</div><div><h2>Das nächste Update geht ohne Kabel.</h2><p>Öffne die Ampel-Verwaltung und wähle „Nach Updates suchen“. Mit „Update installieren“ lädt die Ampel die neue Firmware, prüft sie und startet neu.</p></div></section>
-    <p class="data-note">Bei einer erneuten USB-Installation bleiben Einstellungen erhalten, wenn du die Löschoption deaktiviert lässt. „Alle Gerätedaten löschen“ leert den Flash vor der Installation. Mit „Gerät löschen“ kannst du den gesamten Flash auch ohne Installation leeren; danach ist keine Firmware mehr vorhanden. Während des Schreibens oder Löschens das Kabel angeschlossen lassen.</p>
-    <footer><span>CI-Lights</span><a href="https://github.com/WR-Design-Dev/CI-Lights">Quellcode auf GitHub</a><a href="https://github.com/WR-Design-Dev/CI-Lights/blob/main/README.de.md">Anleitung</a><a href="impressum.html">Impressum</a><a href="datenschutz.html">Datenschutz</a></footer>
+    <section class="next-update"><div class="update-icon" aria-hidden="true">↻</div><div><h2 data-i18n="updateTitle">Your next update needs no cable.</h2><p data-i18n="updateText">Open device administration and choose “Check for updates”. Select “Install update” to download the new firmware, verify it and restart the device.</p></div></section>
+    <p class="data-note" data-i18n="dataNote">When reinstalling via USB, settings are kept if the erase option stays unchecked. “Erase all device data” clears the flash before installation. “Erase device” clears the entire flash without installing anything; no firmware remains afterwards. Keep the cable connected while writing or erasing.</p>
+    <footer><span>CI-Lights</span><a href="https://github.com/WR-Design-Dev/CI-Lights" data-i18n="sourceLink">Source on GitHub</a><a href="https://github.com/WR-Design-Dev/CI-Lights/blob/main/README.md" data-i18n-href="guideHref" data-i18n="guideLink">Guide</a><a href="impressum.html" data-i18n="legalLink">Legal notice</a><a href="datenschutz.html" data-i18n="privacyLink">Privacy</a></footer>
   </main>
 </body>
 </html>

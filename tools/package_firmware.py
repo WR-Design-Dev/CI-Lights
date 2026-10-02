@@ -109,8 +109,11 @@ def build_package(build_dir, output_dir, repository, expected_version=None):
     checksums.append(f'{hashlib.sha256((release_dir / "ota-manifest.json").read_bytes()).hexdigest()}  ota-manifest.json')
     (release_dir / 'SHA256SUMS').write_text('\n'.join(checksums) + '\n', encoding='ascii')
     (site_dir / 'install-manifest.json').write_text(json.dumps(web_manifest, indent=2) + '\n', encoding='utf-8')
-    for name in ('index.html', 'styles.css', 'installer.js', 'flash-core.mjs', 'impressum.html', 'datenschutz.html'):
+    for name in ('index.html', 'styles.css', 'installer.js', 'flash-core.mjs', 'impressum.html', 'datenschutz.html',
+                 'language.mjs', 'translations.mjs', 'language-init.js'):
         shutil.copyfile(root / 'web-flasher' / name, site_dir / name)
+    # Reuse the administration graphic directly so both interfaces stay in sync.
+    shutil.copyfile(root / 'main' / 'assets' / 'TrafficLight.svg', site_dir / 'TrafficLight.svg')
     shutil.copyfile(release_dir / 'SHA256SUMS', version_dir / 'SHA256SUMS')
     (site_dir / '.nojekyll').touch()
     print(f'Release {version}: {len(image)} bytes; {0x1C0000 - len(image)} bytes free in each OTA slot')

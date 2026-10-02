@@ -1,4 +1,7 @@
 import {validateManifest, downloadFiles, checkDevice, writeFirmware} from './flash-core.mjs';
+import {initLanguage, t, localizedError, onLanguageChange} from './language.mjs';
+
+initLanguage();
 
 // Load Espressif's fixed, self-contained bundle only on the user's Connect click.
 const ESPTOOL_URL = 'https://unpkg.com/esptool-js@0.6.1/bundle.js';
@@ -12,16 +15,36 @@ const controls = document.querySelector('#flash-controls');
 const erase = document.querySelector('#erase');
 const progress = document.querySelector('#flash-progress');
 const release = document.querySelector('#release-link');
+const lightPreview = document.querySelector('#traffic-light-preview');
+function lightPreviewReady() {
+  lightPreview.contentDocument?.getElementById('green')?.classList.add('is-on');
+}
+if (lightPreview) {
+  lightPreview.addEventListener('load', lightPreviewReady);
+  lightPreviewReady();
+}
 let manifest;
 let loader;
 let transport;
 let busy = false;
 const supported = window.isSecureContext && Boolean(navigator.serial);
+let currentMessage = {key: 'checkingFiles', values: {}, error: false};
+let versionLabel = 'loading';
 
-function message(text, error = false) {
-  status.textContent = text;
+function message(key, values = {}, error = false) {
+  currentMessage = {key, values, error};
+  status.textContent = t(key, values);
   status.dataset.error = String(error);
 }
+
+function renderVersion() {
+  version.textContent = manifest ? manifest.version : t(versionLabel);
+}
+
+onLanguageChange(() => {
+  renderVersion();
+  message(currentMessage.key, currentMessage.values, currentMessage.error);
+});
 
 function buttons() {
   connectButton.disabled = busy || Boolean(loader) || !supported;
@@ -50,20 +73,19 @@ async function connect() {
   try {
     // Request the port before any await that could lose the click's user gesture.
     const port = await navigator.serial.requestPort();
-    message('Flash-Werkzeug wird von unpkg.com geladen …');
+    message('loadingTool');
     const {ESPLoader, Transport} = await import(ESPTOOL_URL);
     transport = new Transport(port, false);
     const candidate = new ESPLoader({transport, baudrate: 115200, debugLogging: false,
       terminal: {clean() {}, write() {}, writeLine() {}}});
-    message('Ampel wird verbunden … Bei Bedarf BOOT halten und RESET drücken.');
+    message('connecting');
     await candidate.main();
     const size = await checkDevice(candidate);
     loader = candidate;
-    message(`ESP32-S3 mit ${size} verbunden. Installation oder Gerät löschen ist jetzt möglich.`);
+    message('connected', {size});
   } catch (error) {
     await closePort();
-    message(error.name === 'NotFoundError' ? 'Keine Ampel ausgewählt. Du kannst erneut verbinden.' :
-      `Verbindung fehlgeschlagen: ${error.message}. Seriellen Monitor schließen; bei Bedarf BOOT und RESET verwenden.`, true);
+    message(error.name === 'NotFoundError' ? 'noPort' : 'connectionFailed', {error}, true);
   } finally {
     busy = false;
     buttons();
@@ -73,30 +95,27 @@ async function connect() {
 async function flash() {
   if (busy || !loader || !manifest) return;
   const eraseAll = erase.checked;
-  if (!window.confirm(eraseAll ?
-    `Firmware ${manifest.version} installieren und ALLE WLAN-Daten, Zugangsdaten und Branding löschen?` :
-    `Firmware ${manifest.version} installieren? Gespeicherte Einstellungen bleiben erhalten.`)) return;
+  if (!window.confirm(t(eraseAll ? 'confirmInstallErase' : 'confirmInstallKeep', {version: manifest.version}))) return;
   busy = true;
   progress.hidden = false;
   progress.value = 0;
   buttons();
   try {
-    message('Firmware-Dateien werden geladen und mit SHA-256 geprüft …');
+    message('downloading');
     const files = await downloadFiles(manifest);
     await writeFirmware(loader, files, eraseAll, (percent) => {
       progress.value = percent;
-      message(`Firmware wird installiert … ${percent} %. USB-Kabel angeschlossen lassen.`);
-    }, () => message('Alle Gerätedaten werden gelöscht … USB-Kabel angeschlossen lassen.'));
+      message('installing', {percent});
+    }, () => message('erasingData'));
     progress.value = 100;
     let resetFailed = false;
     try { await loader.after('hard_reset'); }
     catch { resetFailed = true; }
     await closePort();
-    message(resetFailed ? 'Firmware installiert. Bitte RESET drücken oder das USB-Kabel neu verbinden.' :
-      'Firmware installiert. Die Ampel startet neu. Falls nötig RESET drücken.');
+    message(resetFailed ? 'installedManualReset' : 'installed');
   } catch (error) {
     await closePort();
-    message(`Installation fehlgeschlagen: ${error.message}. Bitte erneut verbinden und installieren.`, true);
+    message('installFailed', {error}, true);
   } finally {
     busy = false;
     buttons();
@@ -105,18 +124,18 @@ async function flash() {
 
 async function eraseDevice() {
   if (busy || !loader) return;
-  if (!window.confirm('GESAMTEN Flash löschen? Firmware, WLAN-Daten, Zugangsdaten und Branding werden unwiderruflich entfernt. Danach muss eine Firmware neu installiert werden.')) return;
+  if (!window.confirm(t('confirmErase'))) return;
   busy = true;
   progress.hidden = true;
   buttons();
   try {
     await checkDevice(loader);
-    message('Gesamter Flash wird gelöscht … USB-Kabel angeschlossen lassen.');
+    message('erasingFlash');
     await loader.eraseFlash();
-    message('Gerät vollständig gelöscht. Du kannst jetzt Firmware installieren oder die Verbindung trennen.');
+    message('erased');
   } catch (error) {
     await closePort();
-    message(`Löschen fehlgeschlagen: ${error.message}. Bitte erneut verbinden.`, true);
+    message('eraseFailed', {error}, true);
   } finally {
     busy = false;
     buttons();
@@ -130,7 +149,7 @@ async function disconnect() {
   try {
     if (loader) { try { await loader.after('hard_reset'); } catch {} }
     await closePort();
-    message('Verbindung getrennt. Bei Bedarf RESET an der Ampel drücken.');
+    message('disconnected');
   } finally {
     busy = false;
     buttons();
@@ -139,22 +158,24 @@ async function disconnect() {
 
 async function start() {
   if (!supported) {
-    version.textContent = 'USB-Flashen nicht verfügbar';
-    message('Bitte diese Seite über HTTPS in Chrome oder Edge auf einem Computer öffnen.', true);
+    versionLabel = 'unsupportedVersion';
+    renderVersion();
+    message('unsupported', {}, true);
     return;
   }
   try {
     const manifestUrl = new URL('install-manifest.json', window.location.href);
     const response = await fetch(manifestUrl, {cache: 'no-store', signal: AbortSignal.timeout(15000)});
-    if (!response.ok) throw new Error('Keine veröffentlichte Firmware gefunden. Bitte später erneut versuchen.');
+    if (!response.ok) throw localizedError('noFirmware');
     manifest = validateManifest(await response.json(), manifestUrl);
-    version.textContent = manifest.version;
+    renderVersion();
     release.href = manifest.release_url;
-    message('USB-Kabel anschließen und Ampel verbinden.');
+    message('ready');
   } catch (error) {
     manifest = undefined;
-    version.textContent = 'noch nicht verfügbar';
-    message(error.message, true);
+    versionLabel = 'unavailable';
+    renderVersion();
+    message('installFailed', {error}, true);
   } finally {
     // A missing download must not prevent the independent erase function.
     buttons();

@@ -64,6 +64,15 @@ Collaborators** fuer Zugriff, **Settings > Environments** fuer das Secret und
 Impressum und Datenschutz sind ueber den Seitenfuss erreichbar. Die Betreiberangaben
 stammen von der eigenen Seite `lupiflash.ddns.net`; die Datenschutzhinweise
 beschreiben GitHub Pages, UNPKG und die lokale USB-Kommunikation dieser Seite.
+Die Flash-Seite startet auf Englisch. Mit den Flaggen **EN** und **DE** im
+Seitenkopf wechselst du die Sprache, einschliesslich Meldungen, Bestaetigungen
+und Rechtstexten. Die Auswahl bleibt ueber `?lang=en` beziehungsweise `?lang=de`
+beim Wechsel zwischen den Seiten erhalten; Cookies oder Browser-Speicher sind
+dafuer nicht erforderlich.
+Die Ampelgrafik stammt direkt aus `main/assets/TrafficLight.svg`, derselben
+Quelldatei wie die Grafik in der Verwaltungsoberflaeche.
+Farben, Karten, Buttons und Flaggen-Umschalter entsprechen dem Stil der
+Ampel-Verwaltung; die SVG-Flaggen wurden aus deren Umschalter uebernommen.
 
 ## Automatischer Build
 

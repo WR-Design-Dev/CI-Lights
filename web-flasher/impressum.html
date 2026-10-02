@@ -1,27 +1,28 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <title>Impressum · CI-Lights</title>
+  <title data-i18n="legalPageTitle">Legal notice · CI-Lights</title>
   <link rel="stylesheet" href="styles.css">
+  <script type="module" src="language-init.js"></script>
 </head>
 <body>
   <main>
-    <header class="brand"><a href="index.html">CI-Lights</a><span>Open Source · ESP32-S3</span></header>
+    <header class="brand"><a href="index.html">CI-Lights</a><div class="header-tools"><span class="project-tag">Open Source · ESP32-S3</span><div class="language-switch" role="group" aria-label="Language" data-i18n-aria-label="languageLabel"><button type="button" data-language="de" aria-label="German" title="German" data-i18n-aria-label="germanLanguage" data-i18n-title="germanLanguage" aria-pressed="false" disabled><svg class="flag" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="12" fill="#000"/><rect y="12" width="60" height="12" fill="#dd0000"/><rect y="24" width="60" height="12" fill="#ffce00"/></svg></button><button type="button" data-language="en" aria-label="English" title="English" data-i18n-aria-label="englishLanguage" data-i18n-title="englishLanguage" aria-pressed="true" disabled><svg class="flag" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="36" fill="#012169"/><path d="M0 0L60 36M60 0L0 36" stroke="#fff" stroke-width="12"/><path d="M0 0L60 36M60 0L0 36" stroke="#c8102e" stroke-width="4"/><path d="M30 0V36M0 18H60" stroke="#fff" stroke-width="12"/><path d="M30 0V36M0 18H60" stroke="#c8102e" stroke-width="6"/></svg></button></div></div></header>
     <article class="legal">
-      <p class="eyebrow">Betreiber und Kontakt</p>
-      <h1>Impressum</h1>
-      <h2>Angaben gemäß § 5 DDG</h2>
-      <address>Wanja Relitzki<br>Oldekopstraße 60<br>30659 Hannover<br>Deutschland</address>
-      <h2>Kontakt</h2>
-      <p>E-Mail: <a href="mailto:wanja_relitzki@hotmail.com">wanja_relitzki@hotmail.com</a></p>
-      <h2>Inhaltlich verantwortlich</h2>
-      <p>Wanja Relitzki, Anschrift wie oben.</p>
-      <p><a href="index.html">Zurück zur Installation</a></p>
+      <p class="eyebrow" data-i18n="legal0">Operator and contact</p>
+      <h1 data-i18n="legal1">Legal notice</h1>
+      <h2 data-i18n="legal2">Information pursuant to Section 5 of the German Digital Services Act (DDG)</h2>
+      <address data-i18n-html="legal3">Wanja Relitzki<br>Oldekopstraße 60<br>30659 Hannover<br>Germany</address>
+      <h2 data-i18n="legal4">Contact</h2>
+      <p data-i18n-html="legal5">Email: <a href="mailto:wanja_relitzki@hotmail.com">wanja_relitzki@hotmail.com</a></p>
+      <h2 data-i18n="legal6">Responsible for content</h2>
+      <p data-i18n="legal7">Wanja Relitzki, address as above.</p>
+      <p data-i18n-html="legal8"><a href="index.html">Back to installation</a></p>
     </article>
-    <footer><span>CI-Lights</span><a href="index.html">Installation</a><a href="https://github.com/WR-Design-Dev/CI-Lights">Quellcode auf GitHub</a><a href="impressum.html" aria-current="page">Impressum</a><a href="datenschutz.html">Datenschutz</a></footer>
+    <footer><span>CI-Lights</span><a href="index.html" data-i18n="installLink">Installation</a><a href="https://github.com/WR-Design-Dev/CI-Lights" data-i18n="sourceLink">Source on GitHub</a><a href="impressum.html" aria-current="page" data-i18n="legalLink">Legal notice</a><a href="datenschutz.html" data-i18n="privacyLink">Privacy</a></footer>
   </main>
 </body>
 </html>

@@ -50,6 +50,8 @@ class FirmwarePackageTests(unittest.TestCase):
         self.assertEqual(ota['size'], len(self.image))
         self.assertEqual([part['offset'] for part in web['builds'][0]['parts']], [0, 0x8000, 0x11000, 0x20000])
         self.assertEqual(web['layout'], '4mb-ota-v1')
+        self.assertEqual((self.output / 'site' / 'TrafficLight.svg').read_bytes(),
+                         (ROOT / 'main' / 'assets' / 'TrafficLight.svg').read_bytes())
         flash = json.loads((self.source / 'flasher_args.json').read_text(encoding='utf-8'))['flash_files']
         for part in web['builds'][0]['parts']:
             expected = next(self.source / name for offset, name in flash.items() if int(offset, 0) == part['offset'])
