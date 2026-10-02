@@ -8,7 +8,9 @@ rem      git config --global user.name "DEIN NAME"
 rem      git config --global user.email "DEINE GITHUB COMMIT E-MAIL"
 rem   2. Node.js 24 oder neuer: https://nodejs.org/
 rem   3. GitHub CLI: https://cli.github.com/
-rem      gh auth login --hostname github.com --git-protocol https --web
+rem      gh auth login --hostname github.com --git-protocol https --web --scopes repo,workflow
+rem      Bei bestehender Anmeldung ohne Workflow-Recht:
+rem      gh auth refresh --hostname github.com --scopes workflow
 rem      Mit WR-Design-Dev anmelden. Vorhandene Anmeldung wird weiterverwendet.
 rem      Alternativ wird build\github-cli\bin\gh.exe verwendet, falls vorhanden.
 rem   4. Fuer den lokalen Build: ESP-IDF 6.1 mit ESP32-S3-Tools installieren.
