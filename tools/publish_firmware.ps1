@@ -48,6 +48,13 @@ function Get-Checked {
     return ($output -join "`n").Trim()
 }
 
+function Find-NewWorkflowRun {
+    param([string]$RunsJson, [string]$Head, [object[]]$PreviousIds)
+    # PS 5.1 liefert JSON-Arrays als ein Objekt: nicht noch mit @() verschachteln.
+    $runs = ConvertFrom-Json $RunsJson
+    return $runs | Where-Object { $_.headSha -eq $Head -and $_.databaseId -notin $PreviousIds } | Select-Object -First 1
+}
+
 try {
     $git = (Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     # Zuerst Git-Root bestimmen, dann den Workspace-Vorrang anwenden.
@@ -122,7 +129,8 @@ try {
         throw 'main ist veraltet oder verzweigt. Zuerst git pull --ff-only ausfuehren und Konflikte selbst klaeren.'
     }
 
-    Write-Host "`nBrowser-Tests ..."
+    Write-Host "`nBrowser- und Skript-Tests ..."
+    Invoke-Checked 'powershell.exe' @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'tests/test_publish_script.ps1')
     Invoke-Checked $node @('tests/test_ota_ui.js')
     Invoke-Checked $node @('tests/test_web_flasher.mjs')
 
@@ -202,7 +210,7 @@ try {
 
     $head = Get-Checked $git @('rev-parse', 'HEAD')
     $ahead = [int](Get-Checked $git @('rev-list', '--count', 'origin/main..HEAD'))
-    $previousRuns = @(ConvertFrom-Json (Get-Checked $gh @('run', 'list', '--repo', $repository, '--workflow', $workflow, '--limit', '20', '--json', 'databaseId')))
+    $previousRuns = ConvertFrom-Json (Get-Checked $gh @('run', 'list', '--repo', $repository, '--workflow', $workflow, '--limit', '20', '--json', 'databaseId'))
     $previousIds = @($previousRuns | ForEach-Object { $_.databaseId })
     if ($ahead -gt 0) {
         Invoke-Checked $git ($gitAuth + @('push', 'origin', 'main'))
@@ -215,8 +223,8 @@ try {
     $run = $null
     $deadline = [DateTime]::UtcNow.AddMinutes(2)
     do {
-        $runs = @(ConvertFrom-Json (Get-Checked $gh @('run', 'list', '--repo', $repository, '--workflow', $workflow, '--branch', 'main', '--event', $event, '--limit', '20', '--json', 'databaseId,headSha,url')))
-        $run = $runs | Where-Object { $_.headSha -eq $head -and $_.databaseId -notin $previousIds } | Select-Object -First 1
+        $runsJson = Get-Checked $gh @('run', 'list', '--repo', $repository, '--workflow', $workflow, '--branch', 'main', '--event', $event, '--limit', '20', '--json', 'databaseId,headSha,url')
+        $run = Find-NewWorkflowRun $runsJson $head $previousIds
         if (-not $run) { Start-Sleep -Seconds 5 }
     } while (-not $run -and [DateTime]::UtcNow -lt $deadline)
     if (-not $run) { throw "GitHub-Lauf noch nicht gefunden. Status pruefen: https://github.com/$repository/actions" }

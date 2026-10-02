@@ -23,6 +23,9 @@ jobs:
         run: node tests/test_ota_ui.js
       - name: Test USB installer and optional erase
         run: node tests/test_web_flasher.mjs
+      - name: Test publishing script workflow selection
+        shell: pwsh
+        run: ./tests/test_publish_script.ps1
 
   build:
     name: Build ESP32-S3 firmware
