@@ -10,6 +10,8 @@ extern const char traffic_light_svg_start[] asm("_binary_TrafficLight_svg_start"
 extern const char traffic_light_svg_end[] asm("_binary_TrafficLight_svg_end");
 extern const char localization_js_start[] asm("_binary_localization_js_start");
 extern const char localization_js_end[] asm("_binary_localization_js_end");
+extern const char wifi_js_start[] asm("_binary_wifi_js_start");
+extern const char wifi_js_end[] asm("_binary_wifi_js_end");
 
 static const char *asset_content_type(app_branding_format_t format)
 {
@@ -85,6 +87,13 @@ esp_err_t app_web_localization_handler(httpd_req_t *request)
     httpd_resp_set_hdr(request, "Cache-Control", "no-cache");
     return httpd_resp_send(request, localization_js_start,
                            localization_js_end - localization_js_start - 1);
+}
+
+esp_err_t app_web_wifi_handler(httpd_req_t *request)
+{
+    httpd_resp_set_type(request, "text/javascript; charset=utf-8");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-cache");
+    return httpd_resp_send(request, wifi_js_start, wifi_js_end - wifi_js_start - 1);
 }
 
 esp_err_t app_web_branding_status_handler(httpd_req_t *request)

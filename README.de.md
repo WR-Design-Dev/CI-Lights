@@ -107,7 +107,24 @@ Nach dem Verbinden
 sollte das Captive Portal
 automatisch die Einrichtungsseite anzeigen. Falls iOS oder Android sie nicht
 öffnet, rufe `http://192.168.4.1` manuell auf. Dort werden WLAN-Name,
-optional WLAN-Benutzername und WLAN-Passwort gespeichert; bei offenen WLANs bleibt das Passwortfeld leer. Ist ein Benutzername eingetragen, versucht der ESP eine WPA2-Enterprise-Anmeldung per PEAP oder TTLS mit MSCHAPv2. Bei offenen und PSK-WLANs bleibt der Benutzername leer. Die Server-Zertifikatsprüfung ist für diesen Enterprise-Test auf ausdrücklichen Wunsch deaktiviert. Dadurch kann sich ein Angreifer als das Firmen-WLAN ausgeben; vor einem produktiven Einsatz muss stattdessen die Firmen-CA eingebunden und die Prüfung wieder aktiviert werden. Die Seite zeigt auch den künftigen lokalen URL-Namen
+optional WLAN-Benutzername und WLAN-Passwort gespeichert; bei offenen WLANs bleibt das Passwortfeld leer.
+Die WLAN-Liste zeigt die von den Access Points gemeldeten Sicherheitsmodi.
+Bei der Auswahl passen sich die Eingabefelder an. Ein manuell eingetragener Name
+wird ebenfalls gesucht, auch bei einem versteckten WLAN. Pro Profil lässt sich
+**Automatisch erkennen** (Standard), **WPA2/WPA3-Personal (PSK)** oder
+**Enterprise (802.1X)** wählen; diese Auswahl gibt es auch in der Verwaltung.
+Bestehende Profile erhalten automatisch die Erkennung. Beim Verbindungsaufbau
+scannt der ESP erneut und wählt den stärksten AP, zu dem die vorhandenen
+Zugangsdaten passen. Bei Personal/PSK wird nur das WLAN-Passwort verwendet;
+ein gespeicherter Benutzername bleibt erhalten und wird nicht verwendet.
+Enterprise benötigt Benutzername und Passwort und verwendet PEAP oder TTLS
+mit MSCHAPv2. Findet die Automatik zunächst keinen AP, bestimmt der Benutzername
+den ersten Modus. Bei einem Enterprise-Sicherheitskonflikt folgt einmal ein
+Personal/PSK-Versuch mit dem Verbindungszeitlimit des Profils. Ein ausdrücklich
+ausgewählter Modus bleibt bestehen; ein EAP-Zugangsdatenfehler löst keinen
+PSK-Versuch aus. Der Scan prüft weder Passwort noch MAC-Freigabe und erkennt
+auch nicht die Firmen-CA oder das innere EAP-Verfahren.
+Die Server-Zertifikatsprüfung ist für diesen Enterprise-Test auf ausdrücklichen Wunsch deaktiviert. Dadurch kann sich ein Angreifer als das Firmen-WLAN ausgeben; vor einem produktiven Einsatz muss stattdessen die Firmen-CA eingebunden und die Prüfung wieder aktiviert werden. Die Seite zeigt auch den künftigen lokalen URL-Namen
 und die WLAN-MAC-Adresse an. Beides bitte notieren. Nach dem Neustart verbindet
 sich der ESP mit einem gespeicherten WLAN. Bei der Einrichtung müssen ein
 Verwaltungsbenutzername (3 bis 32 Zeichen) und ein Verwaltungspasswort (8 bis
@@ -174,7 +191,15 @@ versucht die WLANs von oben nach unten. Eine geänderte Reihenfolge gilt ab
 dem nächsten Neustart. Bei mehreren Access Points mit demselben Namen bevorzugt
 er den mit dem stärksten Signal. Nach schnellen Fehlversuchen pausiert er kurz
 und versucht es innerhalb des Zeitfensters erneut, bevor er zum nächsten
-gespeicherten WLAN oder zur Einrichtung wechselt. Das einzige gespeicherte WLAN
+gespeicherten WLAN oder zur Einrichtung wechselt. Jedes Profil erhält bei mehreren
+gespeicherten WLANs 30 Sekunden; ein einzeln gespeichertes WLAN erhält 45 Sekunden.
+Ist die WLAN-Anmeldung abgeschlossen, wartet er bei Bedarf bis zu 30 Sekunden
+zusätzlich auf eine DHCP-IP-Adresse. Die DHCP-Fehlermeldung setzt ein bestätigtes
+WLAN-Verbindungsereignis voraus.
+Bei einem fehlgeschlagenen Verbindungsversuch nennt das Log den Anmeldemodus.
+Grund 15 oder 204 bedeutet eine Zeitüberschreitung beim WPA-Schlüsselaustausch;
+die WLAN-Zugangsdaten und gegebenenfalls die Passwort-Zuordnung zur Geräte-MAC
+müssen dann geprüft werden. Das einzige gespeicherte WLAN
 kann in der Verwaltung nicht entfernt werden. Einzeln gespeicherte WLANs aus
 älteren Firmware-Versionen
 werden automatisch als erstes Profil übernommen.
@@ -324,31 +349,16 @@ mDNS kann in manchen Firmen-WLANs durch Client-Isolation oder Multicast-Filter
 blockiert sein; dann ist die Seite nur über die vom Router vergebene
 IP-Adresse erreichbar.
 
-## Diagnose über den USB-Monitor
+## Meldungen über den USB-Monitor
 
-Nach dem Flashen zeigt `idf.py -p COMx monitor` die seriellen Meldungen an
-(`COMx` durch den Port des ESP ersetzen). Beim Start werden der Reset-Grund und
-die Webserver-Aktivierung ausgegeben. Danach erscheint etwa einmal pro Minute
-eine `jenkins: Diagnose`-Zeile mit WLAN-Signalstärke (RSSI), freiem internem
-Heap, bisherigem Minimum, größtem freiem Block und freiem PSRAM.
-
-Der Tag `network` meldet WLAN-Trennungen mit Grund und RSSI sowie die
-Wiederverbindung. `lights_http` meldet angenommene/geschlossene Verbindungen,
-HTTP-Parserfehler und die Dauer von `GET /`, `GET /api/jobs` und `POST /api/mode`.
-Die drei POST-Aufrufe zur manuellen LED-Steuerung werden ebenfalls protokolliert.
-`GET /api/jobs` wird nach dem Speichern des Jenkins-Zugangs und durch den
-Aktualisieren-Knopf der Jobliste ausgelöst.
-
-Wenn bei `lights_http` zwar eine Verbindung angenommen wird, aber kein
-`GET /` oder API-Aufruf folgt, hilft der HTTP-Fehlercode beim Eingrenzen der
-Anfrage. Lange `GET /api/jobs`-Zeiten deuten auf die Jenkins-Verbindung. Viele
-`network: WLAN getrennt`-Zeilen oder schwankender RSSI deuten auf die
-WLAN-Verbindung. Auf dem ESP32-S3-Zero sind 2 MB PSRAM aktiviert. Größere
-`malloc`-Allokationen, Jenkins-Antwortpuffer und JSON-Daten können diesen Speicher
-verwenden; ein Teil des internen Speichers bleibt für Tasks und Hardware
-reserviert. `PSRAM frei 0 B` nach dem Flashen dieser Firmware deutet auf ein
-Problem bei der PSRAM-Initialisierung hin. Die Heap-Werte zeigen, ob
-Speicherdruck besteht.
+`idf.py -p COMx monitor` zeigt die seriellen Meldungen an (`COMx` durch den
+Port des ESP ersetzen). Die Firmware gibt notwendige Warnungen und Fehler
+sowie die WLAN-IP und die Hinweise zur Einrichtung aus. Fehlgeschlagene
+WLAN-Verbindungen nennen den Anmeldemodus und den Trennungsgrund; Fehler
+bei DHCP, Jenkins und dem HTTP-Server werden ebenfalls gemeldet.
+Signalstärke und Speicherwerte stehen in der Verwaltungsseite unter
+`Mikrocontroller`. Zusätzliche WLAN-Diagnosescans und Testausgaben sind
+nicht Bestandteil der Firmware.
 
 ## Einstellungen zurücksetzen
 

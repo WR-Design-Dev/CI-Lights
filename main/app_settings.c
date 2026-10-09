@@ -14,6 +14,7 @@
 #define NVS_KEY_WIFI_SSID "wifi_ssid"
 #define NVS_KEY_WIFI_USERNAME "wifi_user"
 #define NVS_KEY_WIFI_PASSWORD "wifi_password"
+#define NVS_KEY_WIFI_AUTH "wifi_auth"
 #define NVS_KEY_JENKINS_URL "jenkins_url"
 #define NVS_KEY_JENKINS_JOB_PATH "jenkins_job"
 #define NVS_KEY_JENKINS_USER "jenkins_user"
@@ -181,8 +182,20 @@ static esp_err_t load_wifi_profile(nvs_handle_t handle, uint8_t index, bool inde
                       profile->username, &length);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
         profile->username[0] = '\0';
-        return ESP_OK;
+        err = ESP_OK;
     }
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (indexed) {
+        wifi_profile_key(key, NVS_KEY_WIFI_AUTH, index);
+    }
+    uint8_t auth = APP_WIFI_AUTH_AUTO;
+    err = nvs_get_u8(handle, indexed ? key : NVS_KEY_WIFI_AUTH, &auth);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_OK; // Existing profiles gain automatic security detection.
+    }
+    profile->auth = auth < APP_WIFI_AUTH_COUNT ? auth : APP_WIFI_AUTH_AUTO;
     return err;
 }
 
@@ -204,7 +217,10 @@ bool app_config_copy_string(char *destination, size_t destination_size,
 
 bool app_config_wifi_is_valid(const app_config_t *config)
 {
-    return config != NULL && config->wifi_ssid[0] != '\0';
+    return config != NULL && config->wifi_ssid[0] != '\0' &&
+           config->wifi_auth >= APP_WIFI_AUTH_AUTO && config->wifi_auth < APP_WIFI_AUTH_COUNT &&
+           (config->wifi_auth != APP_WIFI_AUTH_ENTERPRISE ||
+            (config->wifi_username[0] != '\0' && config->wifi_password[0] != '\0'));
 }
 
 bool app_config_jenkins_is_valid(const app_config_t *config)
@@ -453,6 +469,7 @@ bool app_config_load(app_config_t *config)
     memcpy(config->wifi_ssid, preferred.ssid, sizeof(config->wifi_ssid));
     memcpy(config->wifi_username, preferred.username, sizeof(config->wifi_username));
     memcpy(config->wifi_password, preferred.password, sizeof(config->wifi_password));
+    config->wifi_auth = preferred.auth;
 
     size_t jenkins_url_size = sizeof(config->jenkins_url);
     size_t jenkins_user_size = sizeof(config->jenkins_user);
@@ -592,16 +609,20 @@ static esp_err_t save_wifi_profiles(const app_wifi_profiles_t *profiles)
         err = nvs_set_u8(handle, NVS_KEY_WIFI_LAST, profiles->last_index);
     }
     const char *prefixes[] = {NVS_KEY_WIFI_SSID, NVS_KEY_WIFI_USERNAME,
-                              NVS_KEY_WIFI_PASSWORD};
+                              NVS_KEY_WIFI_PASSWORD, NVS_KEY_WIFI_AUTH};
     for (uint8_t i = 0; i < APP_WIFI_PROFILE_MAX_COUNT && err == ESP_OK; ++i) {
-        for (size_t field = 0; field < 3 && err == ESP_OK; ++field) {
+        for (size_t field = 0; field < 4 && err == ESP_OK; ++field) {
             char key[16];
             wifi_profile_key(key, prefixes[field], i);
             if (i < profiles->count) {
                 const app_wifi_profile_t *profile = &profiles->entries[i];
-                const char *value = field == 0 ? profile->ssid :
-                                    field == 1 ? profile->username : profile->password;
-                err = nvs_set_str(handle, key, value);
+                if (field == 3) {
+                    err = nvs_set_u8(handle, key, profile->auth);
+                } else {
+                    const char *value = field == 0 ? profile->ssid :
+                                        field == 1 ? profile->username : profile->password;
+                    err = nvs_set_str(handle, key, value);
+                }
             } else {
                 err = nvs_erase_key(handle, key);
                 if (err == ESP_ERR_NVS_NOT_FOUND) {
@@ -610,7 +631,7 @@ static esp_err_t save_wifi_profiles(const app_wifi_profiles_t *profiles)
             }
         }
     }
-    for (size_t field = 0; field < 3 && err == ESP_OK; ++field) {
+    for (size_t field = 0; field < 4 && err == ESP_OK; ++field) {
         err = nvs_erase_key(handle, prefixes[field]);
         if (err == ESP_ERR_NVS_NOT_FOUND) {
             err = ESP_OK;
@@ -652,6 +673,7 @@ esp_err_t app_config_save_wifi(const app_config_t *config)
     memcpy(profile->ssid, config->wifi_ssid, sizeof(profile->ssid));
     memcpy(profile->username, config->wifi_username, sizeof(profile->username));
     memcpy(profile->password, config->wifi_password, sizeof(profile->password));
+    profile->auth = config->wifi_auth;
     return save_wifi_profiles(&profiles);
 }
 

@@ -77,8 +77,8 @@ void app_main(void)
         memcpy(config.wifi_ssid, profile->ssid, sizeof(config.wifi_ssid));
         memcpy(config.wifi_username, profile->username, sizeof(config.wifi_username));
         memcpy(config.wifi_password, profile->password, sizeof(config.wifi_password));
-        uint32_t timeout_ms = wifi_profiles->count == 1 ? 45000 :
-                              attempt == 0 ? 30000 : 15000;
+        config.wifi_auth = profile->auth;
+        uint32_t timeout_ms = wifi_profiles->count == 1 ? 45000 : 30000;
         if (app_connect_to_wifi(&config, timeout_ms)) {
             wifi_connected = true;
             esp_err_t save_err = app_wifi_profiles_mark_success(index);

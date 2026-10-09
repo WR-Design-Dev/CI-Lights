@@ -53,6 +53,11 @@
 #define CAPTIVE_DNS_PACKET_MAX_LENGTH 512
 #define DHCPS_OFFER_DNS 0x02
 
+#define WIFI_AUTH_FIELDS_HTML \
+    "<label>WLAN-Anmeldemodus<select name=\"wifi_auth\"><option value=\"auto\">Automatisch erkennen</option>" \
+    "<option value=\"personal\">WPA2/WPA3-Personal (PSK)</option><option value=\"enterprise\">Enterprise (802.1X)</option></select></label>" \
+    "<p class=\"hint\" data-wifi-security role=\"status\"></p>"
+
 #define LANGUAGE_SWITCH_HTML \
     "<div class=\"language-switch\" role=\"group\" aria-label=\"Sprache\">" \
     "<button type=\"button\" data-language=\"de\" aria-label=\"Deutsch\" title=\"Deutsch\">" \
@@ -300,12 +305,12 @@ static esp_err_t provision_page_handler(httpd_req_t *request)
         "<title>Gerät einrichten</title>"
         "<link rel=\"icon\" href=\"/favicon.ico\" sizes=\"any\">"
         "<style>:root{--navy:#1f2937;--blue:#2563eb;--green:#16a34a;--ink:#102a43;--muted:#5c7080;--surface:#fff}"
-        "*{box-sizing:border-box}body{margin:0;min-height:100vh;background:linear-gradient(145deg,#eef5fb,#f7fbf3);color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}"
+        "*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;min-height:100vh;background:linear-gradient(145deg,#eef5fb,#f7fbf3);color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}"
         ".page{position:relative;max-width:42rem;margin:auto;padding:clamp(1rem,4vw,2rem)}.brand{display:flex;justify-content:center;align-items:center;max-height:16.666vh;margin:0 0 1rem}.language-switch{display:flex;align-items:center;gap:.2rem;width:max-content;margin:0 0 .75rem auto;padding:.2rem;border:1px solid #dbe7ef;border-radius:.7rem;background:#fff}.language-switch button{width:auto;min-height:0;margin:0;padding:.25rem .35rem;border-radius:.4rem;background:transparent;box-shadow:none;line-height:1}.language-switch .flag{display:block;width:1.8rem;height:1.1rem;border-radius:.12rem;box-shadow:0 0 0 1px rgba(16,42,67,.18)}.language-switch button[aria-pressed=\"true\"]{background:#dcebf9;outline:2px solid var(--navy)}"
         ".brand img{display:block;max-width:100%%;max-height:16.666vh;width:auto;height:auto;object-fit:contain}.card{background:var(--surface);border:1px solid #dbe7ef;border-radius:1.25rem;padding:clamp(1.25rem,5vw,2rem);box-shadow:0 1rem 2.5rem rgba(31,41,55,.12)}"
         ".portal-layout{display:grid;grid-template-columns:minmax(0,1fr) 4.7rem;gap:1rem;align-items:stretch}.portal-layout>div{grid-column:1;grid-row:1}.traffic-light{display:flex;grid-column:2;grid-row:1;min-height:100%%;flex-direction:column;align-items:center;filter:drop-shadow(0 .35rem .55rem rgba(31,41,55,.18))}.traffic-light-top{display:block;width:100%%;height:auto;flex:0 0 auto;margin-bottom:-.55rem;position:relative;z-index:1}.traffic-light-middle{width:1.05rem;min-height:1rem;flex:1 1 auto;background:linear-gradient(90deg,#1f2937 0,#1f2937 34%%,#2563eb 34%%,#2563eb 55%%,#1f2937 55%%)}.traffic-light-base{width:100%%;height:1rem;flex:0 0 auto;background:linear-gradient(145deg,#374151,#111827);clip-path:polygon(10%% 0,90%% 0,100%% 100%%,0 100%%)}.intro{min-width:0}.device-name{margin:0 0 .25rem;color:var(--navy);font-size:1.1rem;font-weight:800}"
         ".eyebrow{margin:0;color:var(--blue);font-size:.78rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase}h1{margin:.3rem 0 .5rem;color:var(--navy);font-size:clamp(1.7rem,7vw,2.35rem)}"
-        "p{line-height:1.55}label{display:block;margin-top:1rem;font-weight:700}input{width:100%%;margin-top:.4rem;border:1px solid #b8c9d6;border-radius:.7rem;padding:.85rem;font:inherit}input:focus{outline:3px solid #b9d7fa;border-color:var(--blue)}.wifi-name-field{position:relative}.wifi-name-field input{padding-right:3.1rem}.wifi-name-field button{position:absolute;right:.3rem;bottom:.3rem;width:2.45rem;min-height:0;margin:0;padding:.45rem;border-radius:.5rem;font-size:1.35rem;line-height:1;color:#fff}"
+        "p{line-height:1.55}label{display:block;margin-top:1rem;font-weight:700}input,select{width:100%%;margin-top:.4rem;border:1px solid #b8c9d6;border-radius:.7rem;padding:.85rem;font:inherit}input:focus,select:focus{outline:3px solid #b9d7fa;border-color:var(--blue)}.wifi-name-field{position:relative}.wifi-name-field input{padding-right:3.1rem}.wifi-name-field button{position:absolute;right:.3rem;bottom:.3rem;width:2.45rem;min-height:0;margin:0;padding:.45rem;border-radius:.5rem;font-size:1.35rem;line-height:1;color:#fff}"
         "button{width:100%%;margin-top:1.4rem;border:0;border-radius:.7rem;background:var(--navy);color:#fff;padding:.9rem 1rem;font:700 1rem inherit;box-shadow:0 .35rem .8rem rgba(31,41,55,.2)}button:active{transform:translateY(1px)}"
         ".notice{padding:.85rem 1rem;border-left:.3rem solid var(--green);background:#f1f9e7;border-radius:.4rem}.meta{display:grid;gap:.5rem;padding:1rem;background:#f4f8fb;border:1px solid #d3e2ee;border-radius:.7rem}.meta-label{color:var(--muted);font-size:.88rem;font-weight:700}.device-url,.device-mac{display:block;word-break:break-word;color:var(--navy);font-weight:800;line-height:1.25}.device-url{font-size:clamp(1.2rem,5vw,1.7rem)}.device-mac{font-size:clamp(1.1rem,4.5vw,1.45rem);letter-spacing:.04em}#status{min-height:1.5rem;white-space:pre-wrap;color:var(--navy);font-weight:600}"
         "@media(max-width:360px){.page{padding:.75rem}.card{padding:1.1rem;border-radius:1rem}.portal-layout{grid-template-columns:minmax(0,1fr) 3.5rem;gap:.7rem}}</style></head><body>"
@@ -321,8 +326,8 @@ static esp_err_t provision_page_handler(httpd_req_t *request)
         "%s"
         "%s"
         "<button type=\"submit\">Speichern und neu starten</button></form><p id=\"status\"></p></div></div></section></main>"
-        "<script src=\"/localization.js\"></script><script>const form=document.querySelector('#config'),networks=document.querySelector('#wifi-networks'),status=document.querySelector('#status'),refreshNetworks=document.querySelector('#refresh-networks');let provisionStatusSource='';function showProvisionStatus(message){provisionStatusSource=message;status.textContent=message.startsWith('Fehler: ')?uiI18n.t('Fehler: ')+uiI18n.response(message.slice(8)):uiI18n.response(message)}"
-        "async function loadNetworks(){refreshNetworks.disabled=true;networks.replaceChildren();showProvisionStatus('Suche nach WLANs ...');const r=await fetch('/api/wifi-networks');if(!r.ok)throw new Error(await r.text());const data=await r.json();for(const name of data.networks)networks.append(new Option(name,name));refreshNetworks.disabled=false;showProvisionStatus(data.networks.length?'':'Keine WLANs gefunden. Du kannst den Namen auch manuell eingeben.')}"
+        "<script src=\"/localization.js\"></script><script src=\"/wifi.js\"></script><script>const form=document.querySelector('#config'),wifiSetup=ciLightsWifi.forForm(form),networks=document.querySelector('#wifi-networks'),status=document.querySelector('#status'),refreshNetworks=document.querySelector('#refresh-networks');let provisionStatusSource='';function showProvisionStatus(message){provisionStatusSource=message;status.textContent=message.startsWith('Fehler: ')?uiI18n.t('Fehler: ')+uiI18n.response(message.slice(8)):uiI18n.response(message)}"
+        "async function loadNetworks(){refreshNetworks.disabled=true;networks.replaceChildren();showProvisionStatus('Suche nach WLANs ...');const r=await fetch('/api/wifi-networks');if(!r.ok)throw new Error(await r.text());const data=await r.json();wifiSetup.setNetworks(data.details);refreshNetworks.disabled=false;showProvisionStatus(data.networks.length?'':'Keine WLANs gefunden. Du kannst den Namen auch manuell eingeben.')}"
         "if(refreshNetworks)refreshNetworks.addEventListener('click',()=>loadNetworks().catch(error=>{refreshNetworks.disabled=false;showProvisionStatus('Fehler: '+error.message)}));"
         "form.addEventListener('submit',async e=>{e.preventDefault();"
         "const password=form.elements.admin_password,confirmation=form.elements.admin_password_confirm;"
@@ -334,12 +339,13 @@ static esp_err_t provision_page_handler(httpd_req_t *request)
     const char *wifi_name_field = password_only_setup ? "" :
         "<label>WLAN-Name<div class=\"wifi-name-field\"><input id=\"wifi-ssid\" name=\"wifi_ssid\" list=\"wifi-networks\" autocomplete=\"username\" placeholder=\"WLAN auswählen oder eingeben\" required maxlength=\"32\"><button id=\"refresh-networks\" type=\"button\" aria-label=\"WLANs aktualisieren\" title=\"WLANs aktualisieren\">&#x21bb;</button></div><datalist id=\"wifi-networks\"></datalist></label>";
     const char *wifi_user_field = password_only_setup ? "" :
+        WIFI_AUTH_FIELDS_HTML
         "<label>WLAN-Benutzername (nur WPA2-Enterprise)<input name=\"wifi_username\" type=\"text\" autocomplete=\"username\" maxlength=\"127\"></label>";
     const char *wifi_password_field = password_only_setup ? "" :
         "<label>WLAN-Passwort (bei offenen WLANs leer lassen)<input name=\"wifi_password\" type=\"password\" autocomplete=\"current-password\" maxlength=\"63\"></label>";
     const char *wifi_notice = password_only_setup ?
         "<p class=\"notice\">Gespeicherte WLANs bleiben erhalten.</p>" :
-        "<p class=\"notice\">WPA2-Enterprise: Benutzername und Passwort eintragen. Es wird PEAP oder TTLS mit MSCHAPv2 versucht. Achtung: Die Server-Zertifikatsprüfung ist für diesen Test deaktiviert.</p>";
+        "<p class=\"notice\">Automatik erkennt den WLAN-Anmeldemodus. Bei Enterprise sind Benutzername und Passwort nötig. Achtung: Die Server-Zertifikatsprüfung ist für Enterprise deaktiviert.</p>";
     const char *password_fields = app_admin_password_is_set() ?
         "<p class=\"notice\">Der Verwaltungszugang ist bereits eingerichtet und bleibt erhalten.</p>" :
         "<p class=\"notice\">Lege einen Benutzernamen und ein Verwaltungspasswort fest.</p>"
@@ -521,6 +527,21 @@ static bool wifi_config_from_json(cJSON *json, app_config_t *config)
     cJSON *wifi_ssid = cJSON_GetObjectItemCaseSensitive(json, "wifi_ssid");
     cJSON *wifi_username = cJSON_GetObjectItemCaseSensitive(json, "wifi_username");
     cJSON *wifi_password = cJSON_GetObjectItemCaseSensitive(json, "wifi_password");
+    const cJSON *wifi_auth = cJSON_GetObjectItemCaseSensitive(json, "wifi_auth");
+
+    config->wifi_auth = APP_WIFI_AUTH_AUTO;
+    if (wifi_auth != NULL) {
+        if (!cJSON_IsString(wifi_auth) || wifi_auth->valuestring == NULL) {
+            return false;
+        }
+        if (strcmp(wifi_auth->valuestring, "personal") == 0) {
+            config->wifi_auth = APP_WIFI_AUTH_PERSONAL;
+        } else if (strcmp(wifi_auth->valuestring, "enterprise") == 0) {
+            config->wifi_auth = APP_WIFI_AUTH_ENTERPRISE;
+        } else if (strcmp(wifi_auth->valuestring, "auto") != 0) {
+            return false;
+        }
+    }
 
     if (!cJSON_IsString(wifi_ssid) || !cJSON_IsString(wifi_password) ||
         (wifi_username != NULL && !cJSON_IsString(wifi_username)) ||
@@ -678,6 +699,9 @@ static esp_err_t status_wifi_get_handler(httpd_req_t *request)
         cJSON *entry = cJSON_CreateObject();
         if (entry == NULL ||
             cJSON_AddStringToObject(entry, "ssid", profiles.entries[i].ssid) == NULL ||
+            cJSON_AddStringToObject(entry, "auth", profiles.entries[i].auth == APP_WIFI_AUTH_ENTERPRISE ?
+                                   "enterprise" : profiles.entries[i].auth == APP_WIFI_AUTH_PERSONAL ?
+                                   "personal" : "auto") == NULL ||
             cJSON_AddBoolToObject(entry, "last_used", i == profiles.last_index) == NULL ||
             !cJSON_AddItemToArray(networks, entry)) {
             cJSON_Delete(entry);
@@ -805,10 +829,51 @@ static esp_err_t provision_wifi_networks_handler(httpd_req_t *request)
                                     "Eine WLAN-Suche läuft bereits.");
     }
 
+    char query[128];
+    char encoded_ssid[APP_WIFI_SSID_MAX_LENGTH * 3 + 1];
+    char requested_ssid[APP_WIFI_SSID_MAX_LENGTH + 1] = {0};
+    if (httpd_req_get_url_query_len(request) > 0) {
+        if (httpd_req_get_url_query_str(request, query, sizeof(query)) != ESP_OK ||
+            httpd_query_key_value(query, "ssid", encoded_ssid, sizeof(encoded_ssid)) != ESP_OK) {
+            return send_provision_error(request, "400 Bad Request", "Ungültiger WLAN-Name.");
+        }
+        size_t length = 0;
+        for (size_t i = 0; encoded_ssid[i] != '\0'; ++i) {
+            unsigned char value = encoded_ssid[i];
+            if (value == '%') {
+                char digits[3] = {encoded_ssid[i + 1], '\0', '\0'};
+                if (digits[0] == '\0' || encoded_ssid[i + 2] == '\0') {
+                    return send_provision_error(request, "400 Bad Request", "Ungültiger WLAN-Name.");
+                }
+                digits[1] = encoded_ssid[i + 2];
+                if (strspn(digits, "0123456789abcdefABCDEF") != 2) {
+                    return send_provision_error(request, "400 Bad Request", "Ungültiger WLAN-Name.");
+                }
+                char *end;
+                long decoded = strtol(digits, &end, 16);
+                if (*end != '\0' || decoded <= 0 || decoded > 255) {
+                    return send_provision_error(request, "400 Bad Request", "Ungültiger WLAN-Name.");
+                }
+                value = (unsigned char) decoded;
+                i += 2;
+            } else if (value == '+') {
+                value = ' ';
+            }
+            if (length == APP_WIFI_SSID_MAX_LENGTH) {
+                return send_provision_error(request, "400 Bad Request", "Ungültiger WLAN-Name.");
+            }
+            requested_ssid[length++] = (char) value;
+        }
+        if (length == 0) {
+            return send_provision_error(request, "400 Bad Request", "Ungültiger WLAN-Name.");
+        }
+    }
+
     s_wifi_scan_running = true;
     wifi_scan_config_t scan_config = {
+        .ssid = requested_ssid[0] != '\0' ? (uint8_t *) requested_ssid : NULL,
         .scan_type = WIFI_SCAN_TYPE_ACTIVE,
-        .show_hidden = false,
+        .show_hidden = requested_ssid[0] != '\0',
         .scan_time.active = {
             .min = 100,
             .max = 300,
@@ -825,6 +890,7 @@ static esp_err_t provision_wifi_networks_handler(httpd_req_t *request)
     uint16_t ap_count = 0;
     err = esp_wifi_scan_get_ap_num(&ap_count);
     if (err != ESP_OK) {
+        esp_wifi_clear_ap_list();
         s_wifi_scan_running = false;
         ESP_LOGW(TAG, "Anzahl gefundener WLANs konnte nicht gelesen werden: %s",
                  esp_err_to_name(err));
@@ -844,6 +910,7 @@ static esp_err_t provision_wifi_networks_handler(httpd_req_t *request)
         uint16_t record_count = ap_count;
         err = esp_wifi_scan_get_ap_records(&record_count, ap_records);
         if (err != ESP_OK) {
+            esp_wifi_clear_ap_list();
             free(ap_records);
             s_wifi_scan_running = false;
             ESP_LOGW(TAG, "WLAN-Liste konnte nicht gelesen werden: %s", esp_err_to_name(err));
@@ -855,7 +922,8 @@ static esp_err_t provision_wifi_networks_handler(httpd_req_t *request)
 
     cJSON *result = cJSON_CreateObject();
     cJSON *networks = result == NULL ? NULL : cJSON_AddArrayToObject(result, "networks");
-    if (networks == NULL) {
+    cJSON *details = result == NULL ? NULL : cJSON_AddArrayToObject(result, "details");
+    if (networks == NULL || details == NULL) {
         cJSON_Delete(result);
         free(ap_records);
         s_wifi_scan_running = false;
@@ -871,19 +939,51 @@ static esp_err_t provision_wifi_networks_handler(httpd_req_t *request)
             continue;
         }
 
-        bool already_listed = false;
+        cJSON *entry = NULL;
         cJSON *network;
-        cJSON_ArrayForEach(network, networks) {
-            if (cJSON_IsString(network) && network->valuestring != NULL &&
-                strcmp(network->valuestring, ssid) == 0) {
-                already_listed = true;
+        cJSON_ArrayForEach(network, details) {
+            const cJSON *name = cJSON_GetObjectItemCaseSensitive(network, "ssid");
+            if (cJSON_IsString(name) && strcmp(name->valuestring, ssid) == 0) {
+                entry = network;
                 break;
             }
         }
-        if (!already_listed) {
-            cJSON *network_name = cJSON_CreateString(ssid);
-            if (network_name != NULL) {
-                cJSON_AddItemToArray(networks, network_name);
+        if (entry == NULL) {
+            entry = cJSON_CreateObject();
+            if (entry == NULL || cJSON_AddStringToObject(entry, "ssid", ssid) == NULL ||
+                cJSON_AddNumberToObject(entry, "rssi", ap_records[i].rssi) == NULL ||
+                cJSON_AddArrayToObject(entry, "authmodes") == NULL) {
+                cJSON_Delete(entry);
+                cJSON_Delete(result);
+                free(ap_records);
+                s_wifi_scan_running = false;
+                return send_provision_error(request, "500 Internal Server Error",
+                                            "WLAN-Liste konnte nicht erstellt werden.");
+            }
+            if (!cJSON_AddItemToArray(details, entry)) {
+                cJSON_Delete(entry);
+                goto scan_json_error;
+            }
+            cJSON *name = cJSON_CreateString(ssid);
+            if (name == NULL || !cJSON_AddItemToArray(networks, name)) {
+                cJSON_Delete(name);
+                goto scan_json_error;
+            }
+        }
+        cJSON *modes = cJSON_GetObjectItemCaseSensitive(entry, "authmodes");
+        bool listed = false;
+        cJSON *mode;
+        cJSON_ArrayForEach(mode, modes) {
+            if (mode->valueint == ap_records[i].authmode) {
+                listed = true;
+                break;
+            }
+        }
+        if (!listed) {
+            cJSON *value = cJSON_CreateNumber(ap_records[i].authmode);
+            if (value == NULL || !cJSON_AddItemToArray(modes, value)) {
+                cJSON_Delete(value);
+                goto scan_json_error;
             }
         }
     }
@@ -898,9 +998,17 @@ static esp_err_t provision_wifi_networks_handler(httpd_req_t *request)
     }
 
     httpd_resp_set_type(request, "application/json; charset=utf-8");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     esp_err_t send_err = httpd_resp_send(request, response, HTTPD_RESP_USE_STRLEN);
     free(response);
     return send_err;
+
+scan_json_error:
+    cJSON_Delete(result);
+    free(ap_records);
+    s_wifi_scan_running = false;
+    return send_provision_error(request, "500 Internal Server Error",
+                                "WLAN-Liste konnte nicht erstellt werden.");
 }
 
 static const httpd_uri_t provision_page_uri = {
@@ -949,6 +1057,12 @@ static const httpd_uri_t language_get_uri = {
     .uri = "/api/language",
     .method = HTTP_GET,
     .handler = language_get_handler,
+};
+
+static const httpd_uri_t wifi_js_uri = {
+    .uri = "/wifi.js",
+    .method = HTTP_GET,
+    .handler = app_web_wifi_handler,
 };
 
 static const httpd_uri_t language_post_uri = {
@@ -2207,7 +2321,7 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "<title>CI-Lights</title>"
         "<link rel=\"icon\" href=\"/favicon.ico\" sizes=\"any\">"
         "<style>:root{--navy:#1f2937;--blue:#2563eb;--green:#16a34a;--ink:#102a43;--muted:#5c7080;--surface:#fff}"
-        "*{box-sizing:border-box}body{margin:0;min-height:100vh;background:linear-gradient(145deg,#eef5fb,#f7fbf3);color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}"
+        "*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;min-height:100vh;background:linear-gradient(145deg,#eef5fb,#f7fbf3);color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}"
         ".page{position:relative;max-width:48rem;margin:auto;padding:clamp(1rem,4vw,2rem)}.brand{position:relative;display:flex;justify-content:center;align-items:center;height:clamp(6rem,16.666vh,10rem);margin:0 0 1rem;border:2px dashed #b8c9d6;border-radius:1rem;background:#e8f1f8;overflow:hidden}.brand.has-banner{border-style:solid;background:#fff}.brand img{display:none;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}.brand.has-banner img{display:block}.banner-upload{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.35rem;width:100%;min-height:0;margin:0;border:0;border-radius:0;background:transparent;color:var(--navy);font:700 .95rem inherit;box-shadow:none;cursor:pointer}.banner-upload svg{width:2rem;height:2rem;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.brand.has-banner .banner-upload{opacity:0;background:rgba(31,41,55,.78);color:#fff;transition:opacity .15s}.brand.has-banner .banner-upload:hover,.brand.has-banner .banner-upload:focus-visible{opacity:1}.banner-upload:focus-visible{outline:3px solid var(--blue);outline-offset:-3px}.language-switch{display:flex;align-items:center;gap:.2rem;width:max-content;margin:0 0 .75rem auto;padding:.2rem;border:1px solid #dbe7ef;border-radius:.7rem;background:#fff}.language-switch button{min-height:0;padding:.25rem .35rem;border-radius:.4rem;background:transparent;box-shadow:none;line-height:1}.language-switch .flag{display:block;width:1.8rem;height:1.1rem;border-radius:.12rem;box-shadow:0 0 0 1px rgba(16,42,67,.18)}.language-switch button[aria-pressed=\"true\"]{background:#dcebf9;outline:2px solid var(--navy)}"
         ".card{background:var(--surface);border:1px solid #dbe7ef;border-top:0;border-radius:0 0 1.25rem 1.25rem;padding:clamp(1.25rem,5vw,2rem);box-shadow:0 1rem 2.5rem rgba(31,41,55,.12)}"
         ".eyebrow{margin:0;color:var(--blue);font-size:.78rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase}h1{margin:.3rem 0 1rem;padding:.7rem 1rem;border:1px solid #dbe7ef;border-radius:1rem;background:#fff;color:var(--navy);font-size:clamp(1.7rem,7vw,2.35rem);text-align:center;box-shadow:0 .45rem 1.2rem rgba(31,41,55,.08)}h2{margin-top:0;color:var(--navy);font-size:1.25rem}p{line-height:1.55}"
@@ -2243,6 +2357,7 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "<button type=\"submit\">Intervall speichern</button></form></section>"
         "<section class=\"wifi-settings\"><h2>Gespeicherte WLANs</h2><p class=\"hint\">Beim Start versucht die Ampel die WLANs von oben nach unten und bleibt beim ersten erreichbaren. Mit den Pfeilen änderst du die Reihenfolge; sie gilt ab dem nächsten Neustart. Neue WLANs kommen ans Ende. Bei voller Liste ersetzt ein neues WLAN das letzte Profil. Ist keines erreichbar, startet die WLAN-Einrichtung.</p><p class=\"hint\">Handy-Hotspot und IoT-WLAN: Hotspot nach oben setzen. Zum Verwalten Hotspot einschalten und die Ampel neu starten. Danach Hotspot ausschalten und die Ampel erneut starten, damit sie ins IoT-WLAN wechselt.</p><div id=\"saved-wifi\" class=\"saved-wifi\"></div>"
         "<form id=\"wifi-form\"><label>WLAN-Name<div class=\"wifi-name-field\"><input id=\"wifi-ssid\" name=\"wifi_ssid\" list=\"wifi-networks\" placeholder=\"WLAN auswählen oder eingeben\" required maxlength=\"32\"><button id=\"wifi-refresh\" type=\"button\" aria-label=\"WLANs aktualisieren\" title=\"WLANs aktualisieren\">&#x21bb;</button></div><datalist id=\"wifi-networks\"></datalist></label>"
+        WIFI_AUTH_FIELDS_HTML
         "<label>WLAN-Benutzername (nur WPA2-Enterprise)<input name=\"wifi_username\" maxlength=\"127\"></label><label>WLAN-Passwort (bei offenen WLANs leer lassen)<input name=\"wifi_password\" type=\"password\" maxlength=\"63\"></label>"
         "<p class=\"hint\">Bei geschützten WLANs das Passwort erneut eingeben. Ein bereits gespeicherter WLAN-Name wird aktualisiert.</p><button type=\"submit\">WLAN speichern und neu starten</button></form><p id=\"wifi-scan-status\" class=\"hint\" role=\"status\"></p></section>"
         "<section class=\"poll-settings\"><h2>CPU-Takt</h2><p class=\"hint\">Automatisch: im Leerlauf bis 40 MHz, bei WLAN-, Jenkins- und Verwaltungsanfragen bis zur gewählten Obergrenze. Ein Wechsel wirkt sofort und bleibt gespeichert.</p><label>CPU-Modus<select id=\"cpu-mode\"><option value=\"fixed160\">Fest 160 MHz</option><option value=\"auto160\">Automatisch 40–160 MHz</option><option value=\"auto240\">Automatisch 40–240 MHz</option><option value=\"fixed240\">Fest 240 MHz</option></select></label></section>"
@@ -2257,20 +2372,20 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "<p>Wähle den Job, dessen Status die Ampel anzeigen soll.</p>"
         "<form id=\"job-form\"><div class=\"job-picker\"><label>Jenkins-Job<select id=\"job\" required disabled></select></label><button id=\"refresh-jobs\" class=\"job-refresh\" type=\"button\" aria-label=\"Jobliste aktualisieren\" title=\"Jobliste aktualisieren\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M20 11a8 8 0 1 0-2.3 6.7M20 4v7h-7\"/></svg></button></div><p id=\"job-list-note\" class=\"job-list-note\" role=\"status\">Liste noch nicht geladen.</p>"
         "<button id=\"show-job\" type=\"submit\" disabled>Job anzeigen</button></form></section></div></div></section><details id=\"ota-details\" class=\"device-footer ota-settings\" aria-labelledby=\"ota-title\"><summary id=\"ota-title\">Firmware-Updates</summary><p class=\"hint\">Installiere eine neue Firmware direkt über WLAN. Die Ampel startet danach neu.</p><p>Installiert: <strong id=\"ota-current\">?</strong> | Verfügbar: <strong id=\"ota-latest\">?</strong></p><div class=\"ota-actions\"><button id=\"ota-check\" type=\"button\" disabled>Nach Updates suchen</button><button id=\"ota-install\" type=\"button\" hidden disabled>Update installieren</button></div><progress id=\"ota-progress\" max=\"100\" value=\"0\" hidden aria-label=\"Update-Fortschritt\"></progress><p id=\"ota-message\" class=\"hint\" role=\"status\">Noch nicht nach Updates gesucht.</p></details><details id=\"board-details\" class=\"device-footer\"><summary>Mikrocontroller</summary><div id=\"device-info\" class=\"device-info\"><p class=\"device-message\">Gerätedaten werden geladen ...</p></div></details></main><div id=\"toast\" role=\"status\" aria-live=\"polite\"></div><div id=\"job-loading\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Jobliste wird geladen\" aria-hidden=\"true\"><div class=\"job-loading-card\"><span class=\"spinner\" aria-hidden=\"true\"></span><span>Jobliste wird geladen ...</span></div></div><div id=\"jenkins-loading\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Jenkins-Status wird abgefragt\" aria-hidden=\"true\"><div class=\"job-loading-card\"><span class=\"spinner\" aria-hidden=\"true\"></span><span>Jenkins-Status wird abgefragt ...</span></div></div>"
-        "<script src=\"/localization.js\"></script><script src=\"/ota.js\"></script><script>const loginOverlay=document.querySelector('#login-overlay'),loginForm=document.querySelector('#login-form'),loginUsername=document.querySelector('#login-username'),loginPassword=document.querySelector('#login-password'),loginError=document.querySelector('#login-error'),dashboard=document.querySelector('#dashboard'),nativeFetch=window.fetch.bind(window);let adminAuthorization='',dashboardStarted=false;"
+        "<script src=\"/localization.js\"></script><script src=\"/wifi.js\"></script><script src=\"/ota.js\"></script><script>const loginOverlay=document.querySelector('#login-overlay'),loginForm=document.querySelector('#login-form'),loginUsername=document.querySelector('#login-username'),loginPassword=document.querySelector('#login-password'),loginError=document.querySelector('#login-error'),dashboard=document.querySelector('#dashboard'),nativeFetch=window.fetch.bind(window);let adminAuthorization='',dashboardStarted=false;"
         "function showLogin(){adminAuthorization='';dashboard.inert=true;dashboard.setAttribute('aria-hidden','true');loginOverlay.hidden=false;loginPassword.value='';loginUsername.focus()}"
         "window.fetch=(input,options={})=>{if(typeof input!=='string'||!input.startsWith('/api/')||input==='/api/login')return nativeFetch(input,options);if(!adminAuthorization)return Promise.reject(new Error('Bitte anmelden.'));const headers=new Headers(options.headers);headers.set('Authorization',adminAuthorization);headers.set('X-Admin-UI','1');return nativeFetch(input,{...options,headers}).then(response=>{if(response.status===401){showLogin();throw new Error('Bitte erneut anmelden.')}return response})};"
         "loginForm.addEventListener('submit',async event=>{event.preventDefault();const username=loginUsername.value.trim(),password=loginPassword.value,button=loginForm.querySelector('button');button.disabled=true;loginError.textContent='';try{const response=await nativeFetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});if(!response.ok)throw new Error(await response.text());const bytes=new TextEncoder().encode(username+':'+password);adminAuthorization='Basic '+btoa(String.fromCharCode(...bytes));loginPassword.value='';loginOverlay.hidden=true;dashboard.inert=false;dashboard.setAttribute('aria-hidden','false');if(!dashboardStarted)startDashboard();else refreshDashboard()}catch(error){loginError.textContent=error.message}finally{button.disabled=false}});loginUsername.focus();"
         "const select=document.querySelector('#job'),refreshJobs=document.querySelector('#refresh-jobs'),showJob=document.querySelector('#show-job'),jobListNote=document.querySelector('#job-list-note'),status=document.querySelector('#status'),pollInterval=document.querySelector('#poll-interval'),cpuMode=document.querySelector('#cpu-mode'),controlMode=document.querySelector('#control-mode'),modeHint=document.querySelector('#mode-hint'),buildEffect=document.querySelector('#build-effect'),discoControls=document.querySelector('#disco-controls'),discoEffect=document.querySelector('#disco-effect'),brightness=document.querySelector('#brightness'),brightnessValue=document.querySelector('#brightness-value'),toast=document.querySelector('#toast'),jobLoading=document.querySelector('#job-loading'),jenkinsLoading=document.querySelector('#jenkins-loading');"
-        "const wifiForm=document.querySelector('#wifi-form'),wifiSsid=document.querySelector('#wifi-ssid'),wifiNetworks=document.querySelector('#wifi-networks'),wifiRefresh=document.querySelector('#wifi-refresh'),wifiScanStatus=document.querySelector('#wifi-scan-status'),savedWifi=document.querySelector('#saved-wifi');let wifiData=null,wifiTabLoaded=false,wifiTabLoading=false,wifiScanSource='',wifiOrderPending=false;"
+        "const wifiForm=document.querySelector('#wifi-form'),wifiSsid=document.querySelector('#wifi-ssid'),wifiNetworks=document.querySelector('#wifi-networks'),wifiRefresh=document.querySelector('#wifi-refresh'),wifiScanStatus=document.querySelector('#wifi-scan-status'),savedWifi=document.querySelector('#saved-wifi'),wifiSetup=ciLightsWifi.forForm(wifiForm);let wifiData=null,wifiTabLoaded=false,wifiTabLoading=false,wifiScanSource='',wifiOrderPending=false;"
         "const brandingForms=[...document.querySelectorAll('[data-branding]')];let brandingData=null;"
         "const siteTitleHeading=document.querySelector('#site-title'),siteTitleButton=document.querySelector('#site-title-edit'),siteTitleInput=document.querySelector('#site-title-input');let savedSiteTitle='CI-Lights';"
         "let statusSource='';function showStatus(message,isError=false){statusSource=message;status.textContent=message.startsWith('Fehler: ')?uiI18n.t('Fehler: ')+uiI18n.response(message.slice(8)):uiI18n.response(message);status.dataset.error=isError?'true':'false'}"
         "function showWifiScanStatus(message){wifiScanSource=message;wifiScanStatus.textContent=message.startsWith('Fehler: ')?uiI18n.t('Fehler: ')+uiI18n.response(message.slice(8)):uiI18n.response(message)}"
         "function renderSavedWifi(){if(!wifiData)return;savedWifi.replaceChildren(...wifiData.networks.map((network,index)=>{const row=document.createElement('div'),label=document.createElement('span'),actions=document.createElement('div'),remove=document.createElement('button');row.className='wifi-entry';actions.className='wifi-actions';const tags=[];if(network.ssid===wifiData.connected_ssid)tags.push(uiI18n.t('Verbunden'));if(network.last_used)tags.push(uiI18n.t('Zuletzt verwendet'));label.textContent=(index+1)+'. '+network.ssid+(tags.length?' ('+tags.join(', ')+')':'');for(const [direction,symbol,disabled] of [['up','↑',index===0],['down','↓',index===wifiData.networks.length-1]]){const button=document.createElement('button');button.type='button';button.dataset.direction=direction;button.textContent=symbol;button.title=uiI18n.t(direction==='up'?'Nach oben':'Nach unten');button.setAttribute('aria-label',button.title+': '+network.ssid);button.disabled=disabled||wifiOrderPending;button.addEventListener('click',()=>moveSavedWifi(network.ssid,direction));actions.append(button)}remove.type='button';remove.textContent=uiI18n.t('Entfernen');remove.disabled=wifiData.networks.length===1||wifiOrderPending;remove.addEventListener('click',async()=>{remove.disabled=true;try{const r=await fetch('/api/wifi',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:network.ssid})});if(await showSaveResult(r))await loadSavedWifi();else remove.disabled=false}catch(error){showStatus('Fehler: '+error.message,true);remove.disabled=false}});actions.append(remove);row.append(label,actions);return row}))}"
         "async function moveSavedWifi(ssid,direction){if(wifiOrderPending)return;wifiOrderPending=true;renderSavedWifi();try{const r=await fetch('/api/wifi/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid,direction})});if(await showSaveResult(r))await loadSavedWifi()}catch(error){showStatus('Fehler: '+error.message,true)}finally{wifiOrderPending=false;renderSavedWifi()}}"
-        "async function loadSavedWifi(){const r=await fetch('/api/wifi',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());wifiData=await r.json();if(!wifiTabLoaded)wifiSsid.value=wifiData.connected_ssid;renderSavedWifi()}"
-        "async function loadWifiNetworks(){if(wifiRefresh.disabled)return;wifiRefresh.disabled=true;wifiNetworks.replaceChildren();showWifiScanStatus('Suche nach WLANs ...');try{const r=await fetch('/api/wifi-networks');if(!r.ok)throw new Error(await r.text());const data=await r.json();for(const name of data.networks)wifiNetworks.append(new Option(name,name));showWifiScanStatus(data.networks.length?'':'Keine WLANs gefunden. Du kannst den Namen auch manuell eingeben.')}finally{wifiRefresh.disabled=false}}"
+        "async function loadSavedWifi(){const r=await fetch('/api/wifi',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());wifiData=await r.json();if(!wifiTabLoaded){wifiSsid.value=wifiData.connected_ssid;wifiSetup.setMode(wifiData.networks.find(item=>item.ssid===wifiSsid.value)?.auth||'auto')}renderSavedWifi()}"
+        "async function loadWifiNetworks(){if(wifiRefresh.disabled)return;wifiRefresh.disabled=true;wifiNetworks.replaceChildren();showWifiScanStatus('Suche nach WLANs ...');try{const r=await fetch('/api/wifi-networks');if(!r.ok)throw new Error(await r.text());const data=await r.json();wifiSetup.setNetworks(data.details);showWifiScanStatus(data.networks.length?'':'Keine WLANs gefunden. Du kannst den Namen auch manuell eingeben.')}finally{wifiRefresh.disabled=false}}"
         "function renderBranding(){if(!brandingData)return;const item=brandingData.favicon,state=document.querySelector('[data-branding-state=favicon]');state.textContent=item.uploaded?uiI18n.t('Gespeichert')+' ('+item.format.toUpperCase()+', '+Math.ceil(item.bytes/1024)+' KiB)':uiI18n.t('Noch nicht hochgeladen')}"
         "async function loadSiteTitle(){const r=await fetch('/api/site-title',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());const data=await r.json();savedSiteTitle=data.title;siteTitleHeading.textContent=data.title;if(siteTitleInput.hidden)siteTitleInput.value=data.title;document.title=data.title}"
         "async function loadBranding(){const r=await fetch('/api/branding',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());brandingData=await r.json();renderBranding()}"
@@ -2635,6 +2750,7 @@ void app_start_status_server(const app_config_t *config,
         (err = register_protected_uri(s_status_server, &branding_upload_uri)) != ESP_OK ||
         (err = httpd_register_uri_handler(s_status_server, &traffic_light_uri)) != ESP_OK ||
         (err = httpd_register_uri_handler(s_status_server, &localization_js_uri)) != ESP_OK ||
+        (err = httpd_register_uri_handler(s_status_server, &wifi_js_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &language_get_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &language_post_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &site_title_get_uri)) != ESP_OK ||
@@ -2743,7 +2859,7 @@ void app_start_provisioning(void)
     configure_captive_portal_dhcp(ap_netif);
 
     httpd_config_t server_config = HTTPD_DEFAULT_CONFIG();
-    server_config.max_uri_handlers = 10;
+    server_config.max_uri_handlers = 11;
     server_config.stack_size = 10240;
     ESP_ERROR_CHECK(httpd_start(&s_provision_server, &server_config));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &provision_page_uri));
@@ -2751,6 +2867,7 @@ void app_start_provisioning(void)
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &favicon_ico_uri));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &traffic_light_uri));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &localization_js_uri));
+    ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &wifi_js_uri));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &language_get_uri));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &language_post_uri));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &provision_config_uri));

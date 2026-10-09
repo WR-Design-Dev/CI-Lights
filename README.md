@@ -97,10 +97,22 @@ the repeat. A new code is generated
 after every restart. Setup requires WPA3; WPA2 is not offered.
 After connecting, the captive portal should
 open the setup page automatically. If it does not open on iOS or Android, visit
-`http://192.168.4.1` manually. Enter the Wi-Fi name, optional Wi-Fi username,
-and Wi-Fi password there; leave the password blank for an open network. If a
-username is provided, the ESP attempts WPA2-Enterprise authentication using
-PEAP or TTLS with MSCHAPv2. Leave the username blank for open and PSK networks.
+`http://192.168.4.1` manually. The Wi-Fi list shows the security modes advertised
+by the access points. Selecting a network adjusts the username and password
+fields; a manually entered name is scanned too, including hidden networks.
+Each saved network has an authentication mode: **Detect automatically** (default),
+**WPA2/WPA3-Personal (PSK)**, or **Enterprise (802.1X)**. The same controls are
+available in administration. Older profiles default to automatic detection.
+The ESP scans the network again when connecting and selects the strongest AP
+compatible with the entered credentials. Personal/PSK uses only the Wi-Fi
+password, even if a username is saved. Open/OWE networks need a blank password.
+Enterprise requires a username and password and uses PEAP or TTLS with MSCHAPv2.
+If automatic detection cannot find the AP, it initially uses the username to
+choose Enterprise; a security-mode mismatch then triggers one Personal/PSK
+attempt. Each mode gets the profile's connection timeout. An explicit mode is
+never changed automatically, and EAP credential failures do not trigger PSK.
+The scan identifies advertised security, not whether the password or MAC
+registration is valid, nor the Enterprise CA or inner EAP configuration.
 Server certificate verification is disabled for this Enterprise test. An
 attacker could impersonate the company Wi-Fi network; before production use,
 the company CA must be installed and verification must be enabled. The page
@@ -168,7 +180,14 @@ and tries the networks from top to bottom. A changed order takes effect after
 the next restart. When several
 access points share a name, it prefers the strongest signal. After quick
 connection failures, it pauses briefly and retries within the time window
-before moving to the next saved network or returning to setup. The last
+before moving to the next saved network or returning to setup. Each profile has
+30 seconds when multiple networks are saved; a single saved network has 45 seconds.
+Once Wi-Fi authentication succeeds, it allows up to 30 additional seconds for a
+DHCP address. The DHCP failure message requires a confirmed Wi-Fi connection event.
+Failed connection logs identify the authentication mode. Reason 15 or 204 means
+a WPA handshake timeout. Check the Wi-Fi credentials
+and any password mapping to the device MAC address.
+The last
 remaining Wi-Fi network cannot be removed through the administration page.
 Single saved networks from older firmware versions are automatically
 imported as the first profile.
@@ -316,30 +335,15 @@ some company Wi-Fi networks, client isolation or multicast filtering may
 block mDNS; in that case, the page is reachable only through the IP address
 assigned by the router.
 
-## Diagnostics through the USB monitor
+## Messages through the USB monitor
 
-After flashing, `idf.py -p COMx monitor` shows the serial messages (replace
-`COMx` with the ESP's port). At startup, it prints the reset reason and
-web server activation. About once per minute, a `jenkins: Diagnose` line
-reports Wi-Fi signal strength (RSSI), free internal heap, its historical
-minimum, the largest free block, and free PSRAM.
-
-The `network` tag reports Wi-Fi disconnections with reason and RSSI as well
-as reconnection. `lights_http` reports accepted and closed connections,
-HTTP parser errors, and the durations of `GET /`, `GET /api/jobs`, and
-`POST /api/mode`. The three POST requests for manual LED control are also
-logged. `GET /api/jobs` is triggered when Jenkins credentials are saved and
-by the job list refresh button.
-
-If `lights_http` reports an accepted connection but no following `GET /`
-or API request, the HTTP error code helps identify the problem. Long
-`GET /api/jobs` times point to the Jenkins connection. Frequent
-`network: WLAN getrennt` lines or fluctuating RSSI point to the Wi-Fi
-connection. The ESP32-S3-Zero has 2 MB of PSRAM enabled. Larger `malloc`
-allocations, Jenkins response buffers, and JSON data can use it; some
-internal memory remains reserved for tasks and hardware. `PSRAM frei 0 B`
-after flashing this firmware indicates a PSRAM initialization problem.
-The heap values indicate whether memory is under pressure.
+`idf.py -p COMx monitor` shows the serial messages (replace `COMx` with the
+ESP's port). The firmware prints necessary warnings and errors, the Wi-Fi IP
+address, and setup instructions. Failed Wi-Fi connections include the
+authentication mode and disconnect reason; DHCP, Jenkins, and HTTP server
+failures are reported as well. Signal strength and memory values are available
+under `Microcontroller` in administration. Additional Wi-Fi diagnostic scans
+and test output are not part of the firmware.
 
 ## Reset settings
 

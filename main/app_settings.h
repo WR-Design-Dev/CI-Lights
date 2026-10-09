@@ -18,6 +18,7 @@ typedef struct {
     char ssid[APP_WIFI_SSID_MAX_LENGTH + 1];
     char username[APP_WIFI_USERNAME_MAX_LENGTH + 1];
     char password[APP_WIFI_PASSWORD_MAX_LENGTH + 1];
+    app_wifi_auth_t auth;
 } app_wifi_profile_t;
 
 typedef struct {

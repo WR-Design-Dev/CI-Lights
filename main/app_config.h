@@ -27,10 +27,18 @@ typedef enum {
     APP_BUILD_EFFECT_COUNT,
 } app_build_effect_t;
 
+typedef enum {
+    APP_WIFI_AUTH_AUTO,
+    APP_WIFI_AUTH_PERSONAL,
+    APP_WIFI_AUTH_ENTERPRISE,
+    APP_WIFI_AUTH_COUNT,
+} app_wifi_auth_t;
+
 typedef struct {
     char wifi_ssid[APP_WIFI_SSID_MAX_LENGTH + 1];
     char wifi_username[APP_WIFI_USERNAME_MAX_LENGTH + 1];
     char wifi_password[APP_WIFI_PASSWORD_MAX_LENGTH + 1];
+    app_wifi_auth_t wifi_auth;
     char jenkins_url[APP_JENKINS_URL_MAX_LENGTH + 1];
     char jenkins_job_path[APP_JENKINS_JOB_PATH_MAX_LENGTH + 1];
     char jenkins_user[APP_JENKINS_USER_MAX_LENGTH + 1];
