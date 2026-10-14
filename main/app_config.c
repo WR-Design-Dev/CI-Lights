@@ -2,6 +2,7 @@
 #define LOG_LOCAL_LEVEL ESP_LOG_INFO
 
 #include "app_config.h"
+#include "app_hostname.h"
 #include "app_cpu.h"
 #include "app_ota.h"
 #include "app_security.h"
@@ -249,7 +250,6 @@ static bool s_wifi_scan_running;
 static char s_provision_ssid[33];
 static char s_provision_url[24];
 static esp_ip4_addr_t s_provision_ip;
-static char s_light_hostname[19];
 static app_config_t s_status_config;
 static app_job_selected_handler_t s_job_selected_handler;
 static app_manual_light_handler_t s_manual_light_handler;
@@ -289,11 +289,13 @@ static esp_err_t provision_page_handler(httpd_req_t *request)
                                app_config_load(&existing_config);
     mbedtls_platform_zeroize(&existing_config, sizeof(existing_config));
     uint8_t mac[6];
-    char hostname[sizeof(s_light_hostname)] = "unbekannt";
+    char hostname[APP_HOSTNAME_ACTIVE_MAX_LENGTH + 1] = "unbekannt";
     char mac_address[18] = "unbekannt";
     esp_err_t err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
     if (err == ESP_OK) {
-        snprintf(hostname, sizeof(hostname), "ci-lights-%02x%02x", mac[4], mac[5]);
+        app_hostname_policy_t hostname_policy;
+        app_hostname_policy_init(&hostname_policy, app_config_get_hostname(), mac);
+        snprintf(hostname, sizeof(hostname), "%s", hostname_policy.active);
         snprintf(mac_address, sizeof(mac_address), "%02x:%02x:%02x:%02x:%02x:%02x",
                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     } else {
@@ -1082,6 +1084,16 @@ static const httpd_uri_t site_title_post_uri = {
     .uri = "/api/site-title",
     .method = HTTP_POST,
     .handler = site_title_post_handler,
+};
+
+static const httpd_uri_t hostname_get_uri = {
+    .uri = "/api/hostname", .method = HTTP_GET, .handler = app_hostname_get_handler,
+};
+static const httpd_uri_t hostname_post_uri = {
+    .uri = "/api/hostname", .method = HTTP_POST, .handler = app_hostname_post_handler,
+};
+static const httpd_uri_t hostname_script_uri = {
+    .uri = "/hostname.js", .method = HTTP_GET, .handler = app_hostname_script_handler,
 };
 
 static const httpd_uri_t provision_config_uri = {
@@ -2262,6 +2274,8 @@ static esp_err_t status_device_info_handler(httpd_req_t *request)
     size_t psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
     uint64_t uptime_seconds = (uint64_t) esp_timer_get_time() / 1000000;
 
+    app_hostname_policy_t hostname_policy;
+    app_hostname_snapshot(&hostname_policy);
     cJSON *info = cJSON_CreateObject();
     if (info == NULL ||
         cJSON_AddStringToObject(info, "chip", chip_model_name(chip_info.model)) == NULL ||
@@ -2277,7 +2291,7 @@ static esp_err_t status_device_info_handler(httpd_req_t *request)
         cJSON_AddNumberToObject(info, "apb_hz", apb_hz) == NULL ||
         cJSON_AddNumberToObject(info, "xtal_hz", xtal_hz) == NULL ||
         cJSON_AddNumberToObject(info, "flash_bytes", flash_known ? flash_size : 0) == NULL ||
-        cJSON_AddStringToObject(info, "hostname", s_light_hostname) == NULL ||
+        cJSON_AddStringToObject(info, "hostname", hostname_policy.active) == NULL ||
         cJSON_AddStringToObject(info, "wifi_mac", wifi_mac) == NULL ||
         cJSON_AddStringToObject(info, "wifi_ipv4", wifi_ipv4) == NULL ||
         cJSON_AddStringToObject(info, "wifi_ipv6_global", wifi_ipv6_global) == NULL ||
@@ -2373,7 +2387,7 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "<p>Wähle den Job, dessen Status die Ampel anzeigen soll.</p>"
         "<form id=\"job-form\"><div class=\"job-picker\"><label>Jenkins-Job<select id=\"job\" required disabled></select></label><button id=\"refresh-jobs\" class=\"job-refresh\" type=\"button\" aria-label=\"Jobliste aktualisieren\" title=\"Jobliste aktualisieren\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M20 11a8 8 0 1 0-2.3 6.7M20 4v7h-7\"/></svg></button></div><p id=\"job-list-note\" class=\"job-list-note\" role=\"status\">Liste noch nicht geladen.</p>"
         "<button id=\"show-job\" type=\"submit\" disabled>Job anzeigen</button></form></section></div></div></section><details id=\"ota-details\" class=\"device-footer ota-settings\" aria-labelledby=\"ota-title\"><summary id=\"ota-title\">Firmware-Updates</summary><p class=\"hint\">Installiere eine neue Firmware direkt über WLAN. Die Ampel startet danach neu.</p><p>Installiert: <strong id=\"ota-current\">?</strong> | Verfügbar: <strong id=\"ota-latest\">?</strong></p><div class=\"ota-actions\"><button id=\"ota-check\" type=\"button\" disabled>Nach Updates suchen</button><button id=\"ota-install\" type=\"button\" hidden disabled>Update installieren</button></div><progress id=\"ota-progress\" max=\"100\" value=\"0\" hidden aria-label=\"Update-Fortschritt\"></progress><p id=\"ota-message\" class=\"hint\" role=\"status\">Noch nicht nach Updates gesucht.</p></details><details id=\"board-details\" class=\"device-footer\"><summary>Mikrocontroller</summary><div id=\"device-info\" class=\"device-info\"><p class=\"device-message\">Gerätedaten werden geladen ...</p></div></details></main><div id=\"toast\" role=\"status\" aria-live=\"polite\"></div><div id=\"job-loading\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Jobliste wird geladen\" aria-hidden=\"true\"><div class=\"job-loading-card\"><span class=\"spinner\" aria-hidden=\"true\"></span><span>Jobliste wird geladen ...</span></div></div><div id=\"jenkins-loading\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Jenkins-Status wird abgefragt\" aria-hidden=\"true\"><div class=\"job-loading-card\"><span class=\"spinner\" aria-hidden=\"true\"></span><span>Jenkins-Status wird abgefragt ...</span></div></div>"
-        "<script src=\"/localization.js\"></script><script src=\"/wifi.js\"></script><script src=\"/ota.js\"></script><script>const loginOverlay=document.querySelector('#login-overlay'),loginForm=document.querySelector('#login-form'),loginUsername=document.querySelector('#login-username'),loginPassword=document.querySelector('#login-password'),loginError=document.querySelector('#login-error'),dashboard=document.querySelector('#dashboard'),nativeFetch=window.fetch.bind(window);let adminAuthorization='',dashboardStarted=false;"
+        "<script src=\"/localization.js\"></script><script src=\"/wifi.js\"></script><script src=\"/ota.js\"></script><script src=\"/hostname.js\"></script><script>const loginOverlay=document.querySelector('#login-overlay'),loginForm=document.querySelector('#login-form'),loginUsername=document.querySelector('#login-username'),loginPassword=document.querySelector('#login-password'),loginError=document.querySelector('#login-error'),dashboard=document.querySelector('#dashboard'),nativeFetch=window.fetch.bind(window);let adminAuthorization='',dashboardStarted=false;"
         "function showLogin(){adminAuthorization='';dashboard.inert=true;dashboard.setAttribute('aria-hidden','true');loginOverlay.hidden=false;loginPassword.value='';loginUsername.focus()}"
         "window.fetch=(input,options={})=>{if(typeof input!=='string'||!input.startsWith('/api/')||input==='/api/login')return nativeFetch(input,options);if(!adminAuthorization)return Promise.reject(new Error('Bitte anmelden.'));const headers=new Headers(options.headers);headers.set('Authorization',adminAuthorization);headers.set('X-Admin-UI','1');return nativeFetch(input,{...options,headers}).then(response=>{if(response.status===401){showLogin();throw new Error('Bitte erneut anmelden.')}return response})};"
         "loginForm.addEventListener('submit',async event=>{event.preventDefault();const username=loginUsername.value.trim(),password=loginPassword.value,button=loginForm.querySelector('button');button.disabled=true;loginError.textContent='';try{const response=await nativeFetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});if(!response.ok)throw new Error(await response.text());const bytes=new TextEncoder().encode(username+':'+password);adminAuthorization='Basic '+btoa(String.fromCharCode(...bytes));loginPassword.value='';loginOverlay.hidden=true;dashboard.inert=false;dashboard.setAttribute('aria-hidden','false');if(!dashboardStarted)startDashboard();else refreshDashboard()}catch(error){loginError.textContent=error.message}finally{button.disabled=false}});loginUsername.focus();"
@@ -2463,7 +2477,7 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "body:JSON.stringify({url:select.value})});if(await showSaveResult(r)){if(jobCache){jobCache.selected_url=select.value;cacheJobs()}loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true))}}finally{setJenkinsLoading(false)}});"
         "document.querySelector('#traffic-light').addEventListener('load',()=>{if(adminAuthorization)loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true))});"
         "uiI18n.onChange(()=>{document.title=siteTitleHeading.textContent;showStatus(statusSource,status.dataset.error==='true');showWifiScanStatus(wifiScanSource);setJobListNote(jobListNoteSource);renderSavedWifi();renderBranding();setControlMode(controlMode.value);for(const light of Object.keys(lightLabels)){const button=document.querySelector('[data-light=\"'+light+'\"]');setLightButton(light,button.dataset.enabled==='true')}setGreyDisplay(currentGrey);if(boardDetails.open)loadDeviceInfo()});"
-        "function refreshDashboard(){ciLightsOta.start();restoreJobs();loadSiteTitle().catch(error=>showStatus('Fehler: '+error.message,true));loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true));loadPollInterval().catch(error=>showStatus('Fehler: '+error.message,true));loadCpuMode().catch(error=>showStatus('Fehler: '+error.message,true));refreshJenkinsRequestState();if(boardDetails.open)loadDeviceInfo()}"
+        "function refreshDashboard(){ciLightsOta.start();ciLightsHostname.start();restoreJobs();loadSiteTitle().catch(error=>showStatus('Fehler: '+error.message,true));loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true));loadPollInterval().catch(error=>showStatus('Fehler: '+error.message,true));loadCpuMode().catch(error=>showStatus('Fehler: '+error.message,true));refreshJenkinsRequestState();if(boardDetails.open)loadDeviceInfo()}"
         "function startDashboard(){dashboardStarted=true;uiI18n.start();refreshDashboard();setInterval(()=>{if(!document.hidden&&adminAuthorization)loadLightStates().catch(()=>{})},1000);document.addEventListener('visibilitychange',()=>{if(!document.hidden&&adminAuthorization)loadLightStates().catch(()=>{})});boardDetails.addEventListener('toggle',()=>{if(boardDetails.open&&adminAuthorization)loadDeviceInfo()});setInterval(()=>{if(boardDetails.open&&adminAuthorization)loadDeviceInfo()},60000);setInterval(()=>{if(adminAuthorization)refreshJenkinsRequestState()},3000)}</script></body></html>";
 
     httpd_resp_set_type(request, "text/html; charset=utf-8");
@@ -2715,29 +2729,20 @@ void app_start_status_server(const app_config_t *config,
         ESP_LOGE(TAG, "MAC-Adresse konnte nicht gelesen werden: %s", esp_err_to_name(err));
         return;
     }
-    snprintf(s_light_hostname, sizeof(s_light_hostname), "ci-lights-%02x%02x",
-             mac[4], mac[5]);
-
-    err = mdns_init();
+    err = app_hostname_start();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "mDNS konnte nicht gestartet werden: %s", esp_err_to_name(err));
         return;
     }
-    if ((err = mdns_hostname_set(s_light_hostname)) != ESP_OK ||
-        (err = mdns_instance_name_set("CI-Lights")) != ESP_OK) {
-        ESP_LOGE(TAG, "mDNS-Name konnte nicht gesetzt werden: %s", esp_err_to_name(err));
-        mdns_free();
-        return;
-    }
 
     httpd_config_t server_config = HTTPD_DEFAULT_CONFIG();
-    server_config.max_uri_handlers = 42;
+    server_config.max_uri_handlers = 45;
     server_config.stack_size = STATUS_HTTP_TASK_STACK_SIZE;
     server_config.lru_purge_enable = true;
     err = httpd_start(&s_status_server, &server_config);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Status-Webserver konnte nicht gestartet werden: %s", esp_err_to_name(err));
-        mdns_free();
+        app_hostname_stop();
         return;
     }
     if ((err = httpd_register_uri_handler(s_status_server, &status_page_uri)) != ESP_OK ||
@@ -2765,6 +2770,9 @@ void app_start_status_server(const app_config_t *config,
         (err = register_protected_uri(s_status_server, &language_post_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &site_title_get_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &site_title_post_uri)) != ESP_OK ||
+        (err = register_protected_uri(s_status_server, &hostname_get_uri)) != ESP_OK ||
+        (err = register_protected_uri(s_status_server, &hostname_post_uri)) != ESP_OK ||
+        (err = httpd_register_uri_handler(s_status_server, &hostname_script_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_jobs_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_jenkins_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_jenkins_request_state_uri)) != ESP_OK ||
@@ -2784,7 +2792,7 @@ void app_start_status_server(const app_config_t *config,
         ESP_LOGE(TAG, "Status-Webserver konnte nicht eingerichtet werden: %s", esp_err_to_name(err));
         httpd_stop(s_status_server);
         s_status_server = NULL;
-        mdns_free();
+        app_hostname_stop();
         return;
     }
 
@@ -2801,7 +2809,9 @@ void app_start_status_server(const app_config_t *config,
         ESP_LOGW(TAG, "HTTP-mDNS-Dienst konnte nicht angekündigt werden: %s",
                  esp_err_to_name(err));
     }
-    ESP_LOGI(TAG, "Ampel-Webseite: http://%s.local", s_light_hostname);
+    app_hostname_policy_t hostname_policy;
+    app_hostname_snapshot(&hostname_policy);
+    ESP_LOGI(TAG, "Ampel-Webseite: http://%s.local", hostname_policy.active);
 }
 
 static void generate_provision_password(

@@ -1,16 +1,18 @@
 function showSecurityStatus() {
-  const main = document.querySelector('main');
-  if (!main) return;
-  const panel = document.createElement('details');
-  panel.className = 'device-panel';
-  const title = document.createElement('summary');
+  const updates = document.querySelector('#ota-details');
+  if (!updates) return;
+  const panel = document.createElement('section');
+  panel.id = 'security-status';
+  panel.className = 'device-group';
+  panel.style.marginTop = '1rem';
+  const title = document.createElement('h3');
   const status = document.createElement('p');
   const report = document.createElement('a');
   report.href = '/api/security';
   report.target = '_blank';
   report.rel = 'noopener';
   panel.append(title, status, report);
-  main.append(panel);
+  updates.append(panel);
   let security;
   let loading = false;
   const translate = text => typeof uiI18n !== 'undefined' ? uiI18n.t(text) : text;
@@ -32,11 +34,12 @@ function showSecurityStatus() {
       (security.key_rotation === 'waiting_for_signed_fallback' ? translate('Schlüsselwechsel wartet auf ein weiteres bestätigtes Update mit dem neuen Schlüssel.') : '');
   }
   if (typeof uiI18n !== 'undefined') uiI18n.onChange(render);
+  window.ciLightsSecurity = {update(data) { if (data) { security = data; render(); } }};
   render();
   // The administration page installs its authenticated fetch after login.
   // Opening the panel requests fresh status through that same fetch wrapper.
-  panel.addEventListener('toggle', async () => {
-    if (!panel.open || loading) return;
+  updates.addEventListener('toggle', async () => {
+    if (!updates.open || loading) return;
     loading = true;
     render();
     try {

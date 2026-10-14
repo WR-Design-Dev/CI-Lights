@@ -1,5 +1,17 @@
 // German source strings are also the fallback when the language API is unavailable.
 const uiTranslations = new Map([
+  ['Verwaltungsadresse (.local)', 'Administration address (.local)'],
+  ['Gerätename (ohne .local)', 'Device name (without .local)'],
+  ['Bis zu 32 Zeichen: Buchstaben, Ziffern und Bindestriche; kein Bindestrich am Anfang oder Ende. Leer lassen für den MAC-Standardnamen. Änderungen gelten nach einem Neustart.', 'Up to 32 characters: letters, digits and hyphens; no leading or trailing hyphen. Leave empty for the default MAC name. Changes apply after a restart.'],
+  ['Gerätenamen speichern', 'Save device name'],
+  ['Aktuelle Adresse:', 'Current address:'],
+  ['Gerätename wird geladen.', 'Loading device name.'],
+  ['Gespeichert. Der neue Name gilt nach dem nächsten Neustart.', 'Saved. The new name applies after the next restart.'],
+  ['Wunschname bereits vergeben. Der MAC-Standardname wird aktiviert.', 'Requested name is already in use. Activating the default MAC name.'],
+  ['Wunschname bereits vergeben. Der MAC-Standardname wird verwendet.', 'Requested name is already in use. Using the default MAC name.'],
+  ['Ungültiger Gerätename.', 'Invalid device name.'],
+  ['Gerätename konnte nicht gelesen werden.', 'Could not read the device name.'],
+  ['Gerätename konnte nicht gespeichert werden.', 'Could not save the device name.'],
   ["Sicherheitsstatus", "Security status"],
   ["Sicherheitsstatus wird geladen.", "Loading security status."],
   ["Sicherheitsbericht öffnen", "Open security report"],

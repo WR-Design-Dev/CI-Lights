@@ -28,6 +28,7 @@ Bootloader zuletzt und setzt erst nach vollständiger Übertragung zurück.
 
 Stabile Stromversorgung während Erstinstallation und erstem Start angeschlossen
 lassen. Anschließend in der Ampel-Verwaltung **Sicherheitsstatus** öffnen.
+Der Status befindet sich innerhalb des Panels **Firmware-Updates**.
 `/api/security` liefert den öffentlichen Bericht unter der bestehenden
 Administrator-Anmeldung. `ready`, `secure_boot`, `flash_encryption`,
 `nvs_encryption` und `rom_download_disabled` müssen wahr sein. Ein erfolgreicher

@@ -87,17 +87,22 @@ for (const patch of [{offset: 0x8000}, {path: 'https://elsewhere.test/bootloader
 // Opening device administration must not request protected status before login.
 const elements = [];
 let statusRequests = 0;
+const updates = {children: [], append(element) { this.children.push(element); },
+  addEventListener(name, callback) { this[name] = callback; }};
 const ui = vm.createContext({AbortSignal,
-  document: {readyState: 'complete', querySelector: () => ({append() {}}),
-    createElement() { const element = {append() {}, addEventListener(name, callback) { this[name] = callback; }}; elements.push(element); return element; }},
+  window: {},
+  document: {readyState: 'complete', querySelector: selector => selector === '#ota-details' ? updates : null,
+    createElement(tag) { const element = {tag, style: {}, append() {}}; elements.push(element); return element; }},
   uiI18n: {t: text => text, onChange() {}},
   fetch: async () => { statusRequests++; return {ok: true, json: async () => ({profile: 'secure', ready: true,
     secure_boot: true, flash_encryption: true, nvs_encryption: true, rom_download_disabled: true, revoked_keys: 0, signing_key: 0})}; },
 });
 vm.runInContext(fs.readFileSync(new URL('../main/assets/security.js', import.meta.url), 'utf8'), ui);
 assert.equal(statusRequests, 0);
-elements[0].open = true;
-await elements[0].toggle();
+assert.equal(updates.children[0].id, 'security-status');
+assert.equal(updates.children[0].tag, 'section', 'Security belongs inside Firmware Updates, not a separate disclosure');
+updates.open = true;
+await updates.toggle();
 assert.equal(statusRequests, 1);
 assert.match(elements[2].textContent, /Profil: secure/);
 assert.match(elements[2].textContent, /Prüfung: bestanden/);

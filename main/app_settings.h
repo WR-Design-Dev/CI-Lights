@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 #include "app_config.h"
+#include "app_hostname_policy.h"
 
 #include "esp_err.h"
 
@@ -49,3 +50,5 @@ const char *app_config_get_language(void);
 esp_err_t app_config_save_language(const char *language);
 const char *app_config_get_site_title(void);
 esp_err_t app_config_save_site_title(const char *title);
+const char *app_config_get_hostname(void);
+esp_err_t app_config_save_hostname(const char *hostname);

@@ -31,6 +31,13 @@ leaves the previous firmware active. The new firmware confirms successful local
 startup after ten seconds; a reset before confirmation rolls back to the previous
 firmware. Settings and uploaded branding are preserved during OTA updates.
 
+Under **Wi-Fi → Administration address (.local)**, save a device name such as
+`build-light` to use `http://build-light.local` after a restart. Leave it empty
+for the default MAC name. On a detected conflict, the device falls back to its
+MAC name and displays its actual address. The requested name is kept for the
+next startup. A factory reset clears it; a restart or Wi-Fi failure does not.
+Security status is shown inside the **Firmware updates** panel.
+
 ### Standard or Secure
 
 The installer defaults to **Standard**, which verifies OTA signatures and keeps

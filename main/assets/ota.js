@@ -29,6 +29,7 @@ window.ciLightsOta = (() => {
 
   function render() {
     if (!status) return;
+    window.ciLightsSecurity?.update(status.security);
     current.textContent = status.current_version;
     latest.textContent = status.latest_version || '–';
     message.textContent = uiI18n.t(status.message);

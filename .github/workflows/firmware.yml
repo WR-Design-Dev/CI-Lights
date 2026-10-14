@@ -20,7 +20,10 @@ jobs:
         with:
           node-version: '24'
       - name: Test administration update flow
-        run: node tests/test_ota_ui.js
+        run: |
+          node tests/test_ota_ui.js
+          node tests/test_hostname_ui.js
+          python3 tests/test_hostname_policy.py
       - name: Test USB installer and optional erase
         run: |
           node tests/test_web_flasher.mjs

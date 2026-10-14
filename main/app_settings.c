@@ -27,6 +27,7 @@
 #define NVS_KEY_CPU_MODE "cpu_mode"
 #define NVS_KEY_UI_LANGUAGE "ui_language"
 #define NVS_KEY_SITE_TITLE "site_title"
+#define NVS_KEY_HOSTNAME "hostname"
 #define NVS_KEY_WIFI_COUNT "wifi_count"
 #define NVS_KEY_WIFI_LAST "wifi_last"
 #define NVS_KEY_WIFI_ORDERED "wifi_ordered"
@@ -40,6 +41,7 @@
 static const char *TAG = "settings";
 static char s_ui_language[3] = "de";
 static char s_site_title[APP_SITE_TITLE_MAX_LENGTH + 1] = "CI-Lights";
+static char s_hostname[APP_HOSTNAME_MAX_LENGTH + 1];
 static uint8_t s_admin_salt[ADMIN_SALT_LENGTH];
 static uint8_t s_admin_hash[ADMIN_HASH_LENGTH];
 static bool s_admin_password_set;
@@ -294,6 +296,11 @@ void app_storage_init(void)
             s_site_title[0] == '\0') {
             strcpy(s_site_title, "CI-Lights");
         }
+        char saved_hostname[sizeof(s_hostname)];
+        length = sizeof(saved_hostname);
+        if (nvs_get_str(nvs_handle, NVS_KEY_HOSTNAME, saved_hostname, &length) == ESP_OK) {
+            if (!app_hostname_normalize(saved_hostname, s_hostname)) s_hostname[0] = '\0';
+        }
         nvs_close(nvs_handle);
     }
 }
@@ -430,6 +437,22 @@ esp_err_t app_config_save_site_title(const char *title)
     if (err == ESP_OK) {
         memcpy(s_site_title, title, length + 1);
     }
+    return err;
+}
+
+const char *app_config_get_hostname(void) { return s_hostname; }
+
+esp_err_t app_config_save_hostname(const char *hostname)
+{
+    char normalized[sizeof(s_hostname)];
+    if (!app_hostname_normalize(hostname, normalized)) return ESP_ERR_INVALID_ARG;
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(SETTINGS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) return err;
+    err = nvs_set_str(handle, NVS_KEY_HOSTNAME, normalized);
+    if (err == ESP_OK) err = nvs_commit(handle);
+    nvs_close(handle);
+    if (err == ESP_OK) memcpy(s_hostname, normalized, strlen(normalized) + 1);
     return err;
 }
 
