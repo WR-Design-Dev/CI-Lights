@@ -13,6 +13,10 @@ const disconnectButton = document.querySelector('#disconnect');
 const eraseButton = document.querySelector('#erase-device');
 const controls = document.querySelector('#flash-controls');
 const erase = document.querySelector('#erase');
+const profileSelect = document.querySelector('#firmware-profile');
+const profileDescription = document.querySelector('#profile-description');
+const secureConfirmation = document.querySelector('#secure-confirmation');
+const secureAcknowledged = document.querySelector('#confirm-secure');
 const progress = document.querySelector('#flash-progress');
 const release = document.querySelector('#release-link');
 const lightPreview = document.querySelector('#traffic-light-preview');
@@ -50,6 +54,7 @@ let manifest;
 let loader;
 let transport;
 let busy = false;
+let selectedProfile = 'standard';
 const supported = window.isSecureContext && Boolean(navigator.serial);
 let currentMessage = {key: 'checkingFiles', values: {}, error: false};
 let versionLabel = 'loading';
@@ -65,6 +70,7 @@ function renderVersion() {
 }
 
 onLanguageChange(() => {
+  profileDescription.textContent = t(selectedProfile === 'secure' ? 'secureDescription' : 'standardDescription');
   renderVersion();
   message(currentMessage.key, currentMessage.values, currentMessage.error);
 });
@@ -73,10 +79,15 @@ function buttons() {
   connectButton.disabled = busy || Boolean(loader) || !supported;
   connectButton.hidden = Boolean(loader);
   controls.hidden = !loader;
-  flashButton.disabled = busy || !loader || !manifest;
+  const secure = selectedProfile === 'secure';
+  profileSelect.disabled = busy;
+  secureConfirmation.hidden = !secure;
+  secureAcknowledged.disabled = busy;
+  flashButton.disabled = busy || !loader || !manifest || (secure && !secureAcknowledged.checked);
   disconnectButton.disabled = busy || !loader;
-  eraseButton.disabled = busy || !loader;
-  erase.disabled = busy;
+  eraseButton.disabled = busy || !loader || secure;
+  erase.disabled = busy || secure;
+  if (secure) erase.checked = true;
 }
 
 async function closePort() {
@@ -103,7 +114,7 @@ async function connect() {
       terminal: {clean() {}, write() {}, writeLine() {}}});
     message('connecting');
     await candidate.main();
-    const size = await checkDevice(candidate);
+    const size = await checkDevice(candidate, selectedProfile);
     loader = candidate;
     message('connected', {size});
   } catch (error) {
@@ -117,8 +128,10 @@ async function connect() {
 
 async function flash() {
   if (busy || !loader || !manifest) return;
-  const eraseAll = erase.checked;
-  if (!window.confirm(t(eraseAll ? 'confirmInstallErase' : 'confirmInstallKeep', {version: manifest.version}))) return;
+  const secure = selectedProfile === 'secure';
+  if (secure && !secureAcknowledged.checked) return;
+  const eraseAll = secure || erase.checked;
+  if (!window.confirm(t(secure ? 'confirmSecureInstall' : eraseAll ? 'confirmInstallErase' : 'confirmInstallKeep', {version: manifest.version}))) return;
   busy = true;
   progress.hidden = false;
   progress.value = 0;
@@ -129,13 +142,13 @@ async function flash() {
     await writeFirmware(loader, files, eraseAll, (percent) => {
       progress.value = percent;
       message('installing', {percent});
-    }, () => message('erasingData'));
+    }, () => message('erasingData'), selectedProfile);
     progress.value = 100;
     let resetFailed = false;
     try { await loader.after('hard_reset'); }
     catch { resetFailed = true; }
     await closePort();
-    message(resetFailed ? 'installedManualReset' : 'installed');
+    message(secure ? resetFailed ? 'secureTransferredManualReset' : 'secureTransferred' : resetFailed ? 'installedManualReset' : 'installed');
   } catch (error) {
     await closePort();
     message('installFailed', {error}, true);
@@ -146,7 +159,7 @@ async function flash() {
 }
 
 async function eraseDevice() {
-  if (busy || !loader) return;
+  if (busy || !loader || selectedProfile === 'secure') return;
   if (!window.confirm(t('confirmErase'))) return;
   busy = true;
   progress.hidden = true;
@@ -180,6 +193,7 @@ async function disconnect() {
 }
 
 async function start() {
+  const requestedProfile = selectedProfile;
   if (!supported) {
     versionLabel = 'unsupportedVersion';
     renderVersion();
@@ -187,14 +201,17 @@ async function start() {
     return;
   }
   try {
-    const manifestUrl = new URL('install-manifest.json', window.location.href);
+    const manifestUrl = new URL(requestedProfile === 'secure' ? 'install-manifest-secure.json' : 'install-manifest.json', window.location.href);
     const response = await fetch(manifestUrl, {cache: 'no-store', signal: AbortSignal.timeout(15000)});
     if (!response.ok) throw localizedError('noFirmware');
-    manifest = validateManifest(await response.json(), manifestUrl);
+    const data = await response.json();
+    if (requestedProfile !== selectedProfile) return;
+    manifest = validateManifest(data, manifestUrl, requestedProfile);
     renderVersion();
     release.href = manifest.release_url;
     message('ready');
   } catch (error) {
+    if (requestedProfile !== selectedProfile) return;
     manifest = undefined;
     versionLabel = 'unavailable';
     renderVersion();
@@ -206,6 +223,18 @@ async function start() {
 }
 
 connectButton.addEventListener('click', connect);
+profileSelect.addEventListener('change', async () => {
+  if (busy) return;
+  selectedProfile = profileSelect.value;
+  manifest = undefined;
+  secureAcknowledged.checked = false;
+  erase.checked = selectedProfile === 'secure';
+  profileDescription.textContent = t(selectedProfile === 'secure' ? 'secureDescription' : 'standardDescription');
+  busy = true;
+  buttons();
+  try { await start(); } finally { busy = false; buttons(); }
+});
+secureAcknowledged.addEventListener('change', buttons);
 flashButton.addEventListener('click', flash);
 disconnectButton.addEventListener('click', disconnect);
 eraseButton.addEventListener('click', eraseDevice);

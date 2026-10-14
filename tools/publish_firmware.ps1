@@ -30,7 +30,6 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $OutputEncoding = [Console]::OutputEncoding
 $env:PYTHONUTF8 = '1'
-$repository = 'WR-Design-Dev/CI-Lights'
 $workflow = 'firmware.yml'
 $originalLocation = Get-Location
 
@@ -66,14 +65,18 @@ try {
         $root = Join-Path $root 'Workspace'
     }
     Set-Location -LiteralPath $root
+    $repository = (Get-Content -LiteralPath 'firmware_repository.txt' -Raw).Trim()
+    if ($repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw 'Ungültiges Firmware-Repository.' }
+    $owner = $repository.Split('/')[0]
     if (-not (Test-Path -LiteralPath 'CMakeLists.txt')) {
         throw "Kein CI-Lights-Projekt in $root gefunden."
     }
     $branch = Get-Checked $git @('branch', '--show-current')
     if ($branch -ne 'main') { throw 'Veröffentlichung ist nur auf Branch main erlaubt.' }
     $remote = Get-Checked $git @('remote', 'get-url', 'origin')
-    if ($remote -notmatch '^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)WR-Design-Dev/CI-Lights(?:\.git)?/?$') {
-        throw 'origin muss auf WR-Design-Dev/CI-Lights zeigen.'
+    $expectedRemote = '^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)' + [regex]::Escape($repository) + '(?:\.git)?/?$'
+    if ($remote -notmatch $expectedRemote) {
+        throw "origin muss auf $repository zeigen."
     }
     $staged = Get-Checked $git @('diff', '--cached', '--name-only')
     if ($staged) { throw 'Der Git-Index ist nicht leer. Vorgemerkte Änderungen zuerst selbst bearbeiten.' }
@@ -96,8 +99,8 @@ try {
         }
     }
     $login = Get-Checked $gh @('api', 'user', '--jq', '.login')
-    if ($login -ne 'WR-Design-Dev') {
-        throw 'Mit dem GitHub-Konto WR-Design-Dev anmelden: gh auth switch --user WR-Design-Dev'
+    if ($login -ne $owner) {
+        throw "Mit dem GitHub-Konto $owner anmelden: gh auth switch --user $owner"
     }
     Write-Host "Projekt: $root"
     Write-Host "GitHub: $repository ($login), Node $nodeVersion"
@@ -136,6 +139,7 @@ try {
     Invoke-Checked 'powershell.exe' @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'tests/test_publish_script.ps1')
     Invoke-Checked $node @('tests/test_ota_ui.js')
     Invoke-Checked $node @('tests/test_web_flasher.mjs')
+    Invoke-Checked $node @('tests/test_security_installer.mjs')
 
     if (-not $SkipLocalBuild) {
         # EIM kennt seine eigenen Werkzeugpfade; sein passendes Aktivierungsskript verwenden.
@@ -179,11 +183,10 @@ try {
         }
         Invoke-Checked $python @('tools/prepare_ota_key.py', '--generate')
         $env:CI_LIGHTS_RELEASE_VERSION = $null
-        Write-Host "`nLokaler signierter Firmware-Build ..."
-        Invoke-Checked $python @($idfTool, 'build')
-        Invoke-Checked $python @('-m', 'espsecure', 'verify-signature', '--version', '2', '--keyfile', 'secrets/ota_signing_key.pem', 'build/CI-Lights.bin')
+        Write-Host "`nBeide signierten Firmware-Varianten bauen ..."
+        Invoke-Checked $python @('tools/build_profiles.py', '--profile', 'both')
         Invoke-Checked $python @('-m', 'unittest', 'discover', '-s', 'tests', '-p', 'test_*.py')
-        Invoke-Checked $python @('tools/package_firmware.py', '--output-dir', 'dist/local', '--repository', $repository)
+        Invoke-Checked $python @('tools/package_firmware.py', '--build-dir', 'build-standard', '--secure-build-dir', 'build-secure', '--output-dir', 'dist/local', '--repository', $repository)
     }
 
     Invoke-Checked $git @('-c', 'core.whitespace=cr-at-eol', 'diff', '--check')
@@ -235,7 +238,7 @@ try {
     Invoke-Checked $gh @('run', 'watch', [string]$run.databaseId, '--repo', $repository, '--interval', '15', '--exit-status')
     Write-Host "`nErfolgreich veröffentlicht."
     Write-Host "Firmware: https://github.com/$repository/releases/latest"
-    Write-Host 'Flash-Seite: https://wr-design-dev.github.io/CI-Lights/'
+    Write-Host "Flash-Seite: https://$($owner.ToLower()).github.io/$($repository.Split('/')[1])/"
 } catch {
     Write-Host "`nFEHLER: $($_.Exception.Message)" -ForegroundColor Red
     exit 1

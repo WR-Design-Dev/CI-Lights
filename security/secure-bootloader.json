@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "idf_version": "v6.1",
+  "sha256": "1c010ca252af214ee383d33dfce15b3ee21538df705741cb03d2af3b9539e1e6",
+  "keys": [
+    {
+      "index": 0,
+      "spki_sha256": "af2d11c539330b58d9fe7dc98c620ed072ff7acc9b489e6d15ce4f6dcb8fc864",
+      "efuse_digest": "a2ba7fd1823df5d8cf4e5a80d0d9ec1c922374511a20fca8c109c1ed3c78dde0"
+    },
+    {
+      "index": 1,
+      "spki_sha256": "f5c10464940cfdb45031bd81f187470a46e5156573510562e07c4d98fd641b71",
+      "efuse_digest": "3d22086bb43b21630cbd69fb625e705e7b1691d8be4bdfde3dae78d317bebe6e"
+    },
+    {
+      "index": 2,
+      "spki_sha256": "fea138d6b60c4f4079719240b48caa8b6e949ddc916606f231c9c353ab04e995",
+      "efuse_digest": "449447335d9e3f7af2436b49076c1dfa80e8ed2b1e3ff220ece9abef01f66bd4"
+    }
+  ],
+  "config": {
+    "IDF_TARGET": "esp32s3",
+    "ESPTOOLPY_FLASHSIZE": "4MB",
+    "ESPTOOLPY_FLASHMODE": "dio",
+    "ESPTOOLPY_FLASHFREQ": "80m",
+    "PARTITION_TABLE_OFFSET": 65536,
+    "SECURE_BOOT": true,
+    "SECURE_BOOT_V2_ENABLED": true,
+    "SECURE_SIGNED_APPS_RSA_SCHEME": true,
+    "SECURE_FLASH_ENC_ENABLED": true,
+    "SECURE_FLASH_ENCRYPTION_AES256": true,
+    "SECURE_FLASH_ENCRYPTION_MODE_RELEASE": true,
+    "SECURE_DISABLE_ROM_DL_MODE": true,
+    "SECURE_BOOT_ENABLE_AGGRESSIVE_KEY_REVOKE": false,
+    "SECURE_BOOT_ALLOW_UNUSED_DIGEST_SLOTS": false,
+    "SECURE_BOOT_V2_ALLOW_EFUSE_RD_DIS": false,
+    "SECURE_BOOT_ALLOW_JTAG": false,
+    "SECURE_BOOT_INSECURE": false,
+    "BOOTLOADER_LOG_LEVEL": 2,
+    "BOOTLOADER_COMPILER_OPTIMIZATION_SIZE": true,
+    "EFUSE_VIRTUAL": false
+  }
+}

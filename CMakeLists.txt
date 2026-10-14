@@ -1,5 +1,18 @@
 cmake_minimum_required(VERSION 3.22)
 
+set(CI_LIGHTS_PROFILE "standard" CACHE STRING "Firmware profile: standard or secure")
+if(NOT CI_LIGHTS_PROFILE MATCHES "^(standard|secure)$")
+    message(FATAL_ERROR "Unknown CI-Lights profile: ${CI_LIGHTS_PROFILE}")
+endif()
+set(SDKCONFIG "${CMAKE_BINARY_DIR}/sdkconfig" CACHE FILEPATH "Isolated profile configuration")
+set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults;${CMAKE_CURRENT_LIST_DIR}/sdkconfig.${CI_LIGHTS_PROFILE}")
+set(CI_LIGHTS_KEYRING "${CMAKE_CURRENT_LIST_DIR}/security/secure-keyring.json" CACHE FILEPATH "Public secure key registry")
+set(CI_LIGHTS_SIGNING_KEY "" CACHE FILEPATH "Override signing key for a protected local vault")
+if(NOT CI_LIGHTS_SIGNING_KEY STREQUAL "")
+    file(TO_CMAKE_PATH "${CI_LIGHTS_SIGNING_KEY}" _signing_key_path)
+    file(WRITE "${CMAKE_BINARY_DIR}/signing-key.defaults" "CONFIG_SECURE_BOOT_SIGNING_KEY=\"${_signing_key_path}\"\n")
+    list(APPEND SDKCONFIG_DEFAULTS "${CMAKE_BINARY_DIR}/signing-key.defaults")
+endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 # version.txt records the last successful firmware build. Configure the next
@@ -21,7 +34,22 @@ else()
 endif()
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_firmware_version_file}")
 
-project(CI-Lights)
+if(CI_LIGHTS_PROFILE STREQUAL "secure")
+    project(CI-Lights-Secure)
+else()
+    project(CI-Lights)
+endif()
+
+if(CI_LIGHTS_PROFILE STREQUAL "secure")
+    if(NOT CONFIG_APP_SECURITY_SECURE OR NOT CONFIG_SECURE_BOOT_V2_ENABLED
+       OR NOT CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE OR NOT CONFIG_NVS_ENCRYPTION)
+        message(FATAL_ERROR "Secure profile has a conflicting cached sdkconfig. Use a clean build-secure directory.")
+    endif()
+else()
+    if(CONFIG_APP_SECURITY_SECURE OR CONFIG_SECURE_BOOT OR CONFIG_SECURE_FLASH_ENC_ENABLED OR CONFIG_NVS_ENCRYPTION)
+        message(FATAL_ERROR "Standard profile must not activate hardware security. Use a clean build-standard directory.")
+    endif()
+endif()
 
 # Record the version only after the application binary passes the size check.
 # This target runs for every `idf.py build`, including a build with no edits.

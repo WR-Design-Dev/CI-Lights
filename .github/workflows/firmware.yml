@@ -22,20 +22,24 @@ jobs:
       - name: Test administration update flow
         run: node tests/test_ota_ui.js
       - name: Test USB installer and optional erase
-        run: node tests/test_web_flasher.mjs
+        run: |
+          node tests/test_web_flasher.mjs
+          node tests/test_security_installer.mjs
       - name: Test publishing script workflow selection
         shell: pwsh
         run: ./tests/test_publish_script.ps1
 
   build:
-    name: Build ESP32-S3 firmware
+    name: Build ${{ matrix.profile }} ESP32-S3 firmware
     runs-on: ubuntu-24.04
     needs: browser_tools
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [standard, secure]
     container: espressif/idf:v6.1@sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c
-    # Store the production key in this environment, restricted to main.
-    # A repository-level secret would also be exposed to editable branch workflows.
     environment:
-      name: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && 'firmware-signing' || 'development-build' }}
+      name: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (matrix.profile == 'secure' && 'secure-firmware-signing' || 'firmware-signing') || 'development-build' }}
     env:
       IDF_TARGET: esp32s3
     outputs:
@@ -51,60 +55,99 @@ jobs:
           version="1.0.$((1000 + GITHUB_RUN_NUMBER))"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "CI_LIGHTS_RELEASE_VERSION=$version" >> "$GITHUB_ENV"
-      - name: Prepare production signing key
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      - name: Prepare production standard key
+        if: matrix.profile == 'standard' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           OTA_SIGNING_KEY_PEM: ${{ secrets.OTA_SIGNING_KEY_PEM }}
         shell: bash
         run: |
           . "$IDF_PATH/export.sh" > /dev/null
           python tools/prepare_ota_key.py --from-env
-      - name: Prepare disposable development key
+      - name: Prepare production secure active key
+        if: matrix.profile == 'secure' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          SECURE_SIGNING_KEY_PEM: ${{ secrets.SECURE_SIGNING_KEY_PEM }}
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh" > /dev/null
+          python tools/prepare_secure_keys.py from-env --output secrets/secure_signing_key.pem
+      - name: Prepare disposable development keys
         if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
+        env:
+          PROFILE: ${{ matrix.profile }}
         shell: bash
         run: |
           . "$IDF_PATH/export.sh" > /dev/null
-          python tools/prepare_ota_key.py --development
+          if [[ "$PROFILE" == standard ]]; then
+            python tools/prepare_ota_key.py --development
+          else
+            python tools/prepare_secure_keys.py development
+          fi
       - name: Build and verify firmware
+        env:
+          PROFILE: ${{ matrix.profile }}
+          PRODUCTION: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
         shell: bash
         run: |
           . "$IDF_PATH/export.sh" > /dev/null
-          idf.py build
-          python -m espsecure verify-signature --version 2 --keyfile secrets/ota_signing_key.pem build/CI-Lights.bin
+          if [[ "$PRODUCTION" == true ]]; then
+            python tools/build_profiles.py --profile "$PROFILE" --ci
+          else
+            python tools/build_profiles.py --profile "$PROFILE" --development
+          fi
           python -m unittest discover -s tests -p 'test_*.py'
-      - name: Package OTA release and browser installer
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        shell: bash
-        run: |
-          . "$IDF_PATH/export.sh" > /dev/null
-          python tools/package_firmware.py --version "$CI_LIGHTS_RELEASE_VERSION" --repository "$GITHUB_REPOSITORY"
-      - name: Remove temporary signing key
+      - name: Remove temporary signing keys
         if: always()
         shell: bash
         run: |
           . "$IDF_PATH/export.sh" > /dev/null
-          python -c "from pathlib import Path; Path('secrets/ota_signing_key.pem').unlink(missing_ok=True)"
-      - name: Upload development build
-        if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
+          python -c "from pathlib import Path; [p.unlink(missing_ok=True) for p in Path('secrets').glob('*.pem')]"
+      - name: Upload verified profile files
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: development-firmware-${{ steps.version.outputs.version }}
+          name: profile-${{ matrix.profile }}-${{ steps.version.outputs.version }}
           path: |
-            build/CI-Lights.bin
-            build/bootloader/bootloader.bin
-            build/partition_table/partition-table.bin
-            build/ota_data_initial.bin
+            build-${{ matrix.profile }}/*.bin
+            build-${{ matrix.profile }}/bootloader/*.bin
+            build-${{ matrix.profile }}/partition_table/*.bin
+            build-${{ matrix.profile }}/config/sdkconfig.json
+            build-${{ matrix.profile }}/flasher_args.json
           retention-days: 7
+
+  package:
+    name: Verify and package both production variants
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    container: espressif/idf:v6.1@sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c
+    # This job has public keys and the approved public bootloader, no private secrets.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: profile-standard-${{ needs.build.outputs.version }}
+          path: build-standard/
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: profile-secure-${{ needs.build.outputs.version }}
+          path: build-secure/
+      - name: Package OTA releases and browser installer
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh" > /dev/null
+          python tools/package_firmware.py --build-dir build-standard --secure-build-dir build-secure --version "$VERSION" --repository "$GITHUB_REPOSITORY"
       - name: Upload release assets
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: release-assets
           path: dist/release/
           retention-days: 7
       - name: Upload browser installer
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: browser-installer
           path: dist/site/
@@ -114,7 +157,7 @@ jobs:
   publish:
     name: Publish GitHub Release and browser installer
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: build
+    needs: [build, package]
     runs-on: ubuntu-24.04
     # Builds run for every push. Publication is serialized and never moves
     # the latest release back to an older build which happened to finish later.

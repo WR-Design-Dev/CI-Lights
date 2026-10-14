@@ -136,3 +136,18 @@ footer a { color: var(--muted); }
   .next-update { padding: .85rem; }
   footer { gap: .7rem 1rem; padding: 1rem; }
 }
+/* Firmware variant and permanent-protection acknowledgement. */
+.profile-label { display: block; margin-top: 1rem; font-weight: 600; }
+#firmware-profile { width: 100%; max-width: 100%; margin: .5rem 0; padding: .75rem; border: 1px solid #d6d3d1; border-radius: .5rem; background: white; color: #1c1917; font: inherit; }
+#secure-confirmation { align-items: flex-start; margin: 1rem 0; line-height: 1.5; }
+.security-info { margin: 1rem 0; padding: 1.3rem; border: 1px solid var(--line); border-radius: 1rem; background: #fff; scroll-margin-top: 1rem; }
+.security-info h3 { margin-top: 1.3rem; }
+.security-info p, .security-info li { color: var(--muted); font-size: .93rem; line-height: 1.65; }
+.security-info ul { padding-left: 1.3rem; }
+.security-info li + li { margin-top: .65rem; }
+.security-info strong { color: var(--navy); }
+.security-permanent { margin-top: 1.2rem; padding: 1rem; border-left: .3rem solid #a11227; border-radius: .4rem; background: #fff0f1; }
+.security-permanent h3 { margin-top: 0; color: #a11227; }
+.security-permanent p:last-child { margin-bottom: 0; }
+.security-info .security-limit { font-size: .85rem; }
+.security-info .security-test-status { padding: .75rem; border: 1px solid #e1bf66; border-radius: .4rem; background: #fff9e8; color: #634a0d; }

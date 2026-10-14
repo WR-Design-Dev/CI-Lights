@@ -1,4 +1,17 @@
 menu "CI-Lights firmware updates"
+    config APP_SECURITY_SECURE
+        bool "Secure hardware profile"
+        default n
+    config APP_SECURE_KEY_INDEX
+        int "Active secure signing key index"
+        depends on APP_SECURITY_SECURE
+        range 0 2
+        default 0
+    config APP_SECURE_REVOKE_MASK
+        int "Signed release key revocation policy (bit 0=K0, 1=K1, 2=K2)"
+        depends on APP_SECURITY_SECURE
+        range 0 7
+        default 0
     config APP_OTA_GITHUB_REPOSITORY
         string "Public GitHub repository for OTA release assets"
         default "WR-Design-Dev/CI-Lights"

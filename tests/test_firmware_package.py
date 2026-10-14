@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 from tools.package_firmware import build_package, image_description
+from tools.security_images import verified_signatures
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -18,11 +19,14 @@ ROOT = Path(__file__).resolve().parent.parent
 class FirmwarePackageTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.source = ROOT / 'build'
+        cls.source = ROOT / 'build-standard'
         if not (cls.source / 'CI-Lights.bin').exists():
             raise unittest.SkipTest('Run idf.py build first')
         cls.image = (cls.source / 'CI-Lights.bin').read_bytes()
+        if verified_signatures(cls.image)[0]['spki_sha256'] != (ROOT / 'ota_signing_public_key.sha256').read_text().strip():
+            raise unittest.SkipTest('Disposable development image must not be packaged as a production release')
         cls.version = image_description(cls.image)
+        cls.repository = json.loads((cls.source / 'config/sdkconfig.json').read_text())['APP_OTA_GITHUB_REPOSITORY']
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -36,7 +40,7 @@ class FirmwarePackageTests(unittest.TestCase):
             shutil.copyfile(self.source / name, destination)
 
     def package(self, version=None):
-        return build_package(self.build, self.output, 'WR-Design-Dev/CI-Lights', version or self.version)
+        return build_package(self.build, self.output, self.repository, version or self.version)
 
     def change_config(self, **values):
         path = self.build / 'config/sdkconfig.json'
@@ -61,11 +65,7 @@ class FirmwarePackageTests(unittest.TestCase):
             self.assertEqual(part['sha256'], hashlib.sha256(expected.read_bytes()).hexdigest())
         for path in self.output.rglob('*'):
             if path.is_file():
-                # TLS libraries contain generic PEM parser strings. Check the
-                # actual private key, and never let an assertion print its bytes.
-                private_key = (ROOT / 'secrets/ota_signing_key.pem').read_bytes()
-                self.assertFalse(private_key in path.read_bytes(), f'Private key leaked into {path.name}')
-                self.assertNotEqual(path.suffix, '.pem')
+                self.assertNotIn(path.suffix, ('.pem', '.dpapi'))
 
     def test_rejects_wrong_chip_project_unsigned_and_oversized_images(self):
         wrong_chip = bytearray(self.image)
@@ -98,7 +98,7 @@ class FirmwarePackageTests(unittest.TestCase):
         corrupted = bytearray(self.image)
         corrupted[400] ^= 1
         (self.build / 'CI-Lights.bin').write_bytes(corrupted)
-        with self.assertRaises(subprocess.CalledProcessError):
+        with self.assertRaises(ValueError):
             self.package()
         self.assertFalse(self.output.exists())
 

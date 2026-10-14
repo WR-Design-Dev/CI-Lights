@@ -4,6 +4,7 @@
 #include "app_config.h"
 #include "app_cpu.h"
 #include "app_ota.h"
+#include "app_security.h"
 #include "app_settings.h"
 #include "app_web_assets.h"
 #include "jenkins_client.h"
@@ -313,7 +314,7 @@ static esp_err_t provision_page_handler(httpd_req_t *request)
         "p{line-height:1.55}label{display:block;margin-top:1rem;font-weight:700}input,select{width:100%%;margin-top:.4rem;border:1px solid #b8c9d6;border-radius:.7rem;padding:.85rem;font:inherit}input:focus,select:focus{outline:3px solid #b9d7fa;border-color:var(--blue)}.wifi-name-field{position:relative}.wifi-name-field input{padding-right:3.1rem}.wifi-name-field button{position:absolute;right:.3rem;bottom:.3rem;width:2.45rem;min-height:0;margin:0;padding:.45rem;border-radius:.5rem;font-size:1.35rem;line-height:1;color:#fff}"
         "button{width:100%%;margin-top:1.4rem;border:0;border-radius:.7rem;background:var(--navy);color:#fff;padding:.9rem 1rem;font:700 1rem inherit;box-shadow:0 .35rem .8rem rgba(31,41,55,.2)}button:active{transform:translateY(1px)}"
         ".notice{padding:.85rem 1rem;border-left:.3rem solid var(--green);background:#f1f9e7;border-radius:.4rem}.meta{display:grid;gap:.5rem;padding:1rem;background:#f4f8fb;border:1px solid #d3e2ee;border-radius:.7rem}.meta-label{color:var(--muted);font-size:.88rem;font-weight:700}.device-url,.device-mac{display:block;word-break:break-word;color:var(--navy);font-weight:800;line-height:1.25}.device-url{font-size:clamp(1.2rem,5vw,1.7rem)}.device-mac{font-size:clamp(1.1rem,4.5vw,1.45rem);letter-spacing:.04em}#status{min-height:1.5rem;white-space:pre-wrap;color:var(--navy);font-weight:600}"
-        "@media(max-width:360px){.page{padding:.75rem}.card{padding:1.1rem;border-radius:1rem}.portal-layout{grid-template-columns:minmax(0,1fr) 3.5rem;gap:.7rem}}</style></head><body>"
+        "@media(max-width:360px){.page{padding:.75rem}.card{padding:1.1rem;border-radius:1rem}.portal-layout{grid-template-columns:minmax(0,1fr) 3.5rem;gap:.7rem}}</style><script src=\"/security.js\" defer></script></head><body>"
         "<main class=\"page\">" LANGUAGE_SWITCH_HTML
         "<header class=\"brand\" style=\"display:none\"><img src=\"/logo.svg\" alt=\"Logo\" onload=\"this.parentElement.style.display=\'flex\'\" onerror=\"this.parentElement.style.display=\'none\'\"></header><section class=\"card\">"
         "<div class=\"portal-layout\"><aside class=\"traffic-light\" aria-label=\"CI-Lights\"><img class=\"traffic-light-top\" src=\"/traffic-light.svg\" alt=\"CI-Lights\"><div class=\"traffic-light-middle\"></div><div class=\"traffic-light-base\"></div></aside><div>"
@@ -2338,7 +2339,7 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "#toast{position:fixed;z-index:10;top:1rem;right:1rem;width:min(calc(100vw - 2rem),28rem);padding:1rem 1.25rem;border-radius:.85rem;background:#357b12;color:#fff;font-weight:750;line-height:1.4;text-align:center;box-shadow:0 1rem 2.5rem rgba(16,42,67,.3);opacity:0;pointer-events:none;transform:translateY(-.5rem);transition:opacity .2s ease,transform .2s ease}#toast.show{opacity:1;transform:translateY(0)}"
         "#job-loading,#jenkins-loading{position:fixed;z-index:20;inset:0;display:none;align-items:center;justify-content:center;padding:1rem;background:rgba(16,42,67,.42)}#job-loading.show,#jenkins-loading.show{display:flex}.job-loading-card{display:flex;align-items:center;gap:.8rem;padding:1rem 1.25rem;border-radius:.85rem;background:#fff;color:var(--navy);font-weight:750;box-shadow:0 1rem 2.5rem rgba(16,42,67,.3)}.spinner{width:1.7rem;height:1.7rem;flex:0 0 auto;border:.25rem solid #c8d9e8;border-top-color:var(--blue);border-radius:50%;animation:job-spin .8s linear infinite}@keyframes job-spin{to{transform:rotate(360deg)}}"
         ".login-overlay{position:fixed;z-index:100;inset:0;display:flex;align-items:center;justify-content:center;padding:1rem;background:rgba(16,42,67,.55);backdrop-filter:blur(4px)}.login-overlay[hidden]{display:none}.login-card{width:min(100%,27rem);padding:clamp(1.5rem,5vw,2.25rem);border:1px solid #dbe7ef;border-radius:1.25rem;background:#fff;box-shadow:0 1.5rem 3rem rgba(0,32,65,.28)}.login-card h2{margin:.35rem 0 .4rem;font-size:1.6rem}.login-card .hint{margin:0}.login-card button{margin-top:1.25rem}.login-error{min-height:1.3rem;margin:.8rem 0 0;color:#a11227;font-size:.9rem;font-weight:700}"
-        "@media(max-width:430px){.page{padding:.75rem}.card{padding:1.1rem;border-radius:0 0 1rem 1rem}.tabs{padding:0 .4rem}.tabs a{padding:.65rem .3rem;font-size:.78rem}.portal-layout{grid-template-columns:minmax(0,1fr) 3.3rem;gap:.75rem}.manual-controls{grid-template-columns:1fr}}.ota-actions{display:flex;flex-wrap:wrap;gap:.65rem}.ota-settings progress{width:100%;margin-top:1rem}.ota-settings [data-error=\"true\"]{color:#a11227}</style></head><body>"
+        "@media(max-width:430px){.page{padding:.75rem}.card{padding:1.1rem;border-radius:0 0 1rem 1rem}.tabs{padding:0 .4rem}.tabs a{padding:.65rem .3rem;font-size:.78rem}.portal-layout{grid-template-columns:minmax(0,1fr) 3.3rem;gap:.75rem}.manual-controls{grid-template-columns:1fr}}.ota-actions{display:flex;flex-wrap:wrap;gap:.65rem}.ota-settings progress{width:100%;margin-top:1rem}.ota-settings [data-error=\"true\"]{color:#a11227}</style><script src=\"/security.js\" defer></script></head><body>"
         "<div id=\"login-overlay\" class=\"login-overlay\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"login-title\"><form id=\"login-form\" class=\"login-card\"><p class=\"eyebrow\">CI-Lights</p><h2 id=\"login-title\">Verwaltung anmelden</h2><p class=\"hint\">Melde dich mit dem Benutzernamen und Passwort aus der Einrichtung an.</p><label>Benutzername<input id=\"login-username\" name=\"username\" autocomplete=\"username\" required maxlength=\"32\" autofocus></label><label>Passwort<input id=\"login-password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" required></label><p id=\"login-error\" class=\"login-error\" role=\"alert\"></p><button type=\"submit\">Anmelden</button></form></div>"
         "<main id=\"dashboard\" class=\"page\" inert aria-hidden=\"true\">" LANGUAGE_SWITCH_HTML
         "<form id=\"banner-form\" class=\"brand\" data-branding=\"logo\"><img src=\"/logo.svg\" alt=\"Banner\" onload=\"this.parentElement.classList.add('has-banner')\" onerror=\"this.parentElement.classList.remove('has-banner')\"><input id=\"banner-file\" type=\"file\" accept=\".svg,image/svg+xml,.png,image/png\" required hidden><button class=\"banner-upload\" type=\"button\" title=\"Banner hochladen (SVG oder PNG, maximal 32 KiB)\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 16V3m0 0L7 8m5-5 5 5M4 16v4h16v-4\"/></svg><span>Banner hochladen</span></button></form>"
@@ -2661,6 +2662,13 @@ bool app_config_web_ready(void)
     return s_status_server != NULL || s_provision_server != NULL;
 }
 
+static const httpd_uri_t security_status_uri = {
+    .uri = "/api/security", .method = HTTP_GET, .handler = app_security_status_handler,
+};
+static const httpd_uri_t security_script_uri = {
+    .uri = "/security.js", .method = HTTP_GET, .handler = app_security_script_handler,
+};
+
 static const httpd_uri_t status_control_mode_uri = {
     .uri = "/api/mode",
     .method = HTTP_POST,
@@ -2723,7 +2731,7 @@ void app_start_status_server(const app_config_t *config,
     }
 
     httpd_config_t server_config = HTTPD_DEFAULT_CONFIG();
-    server_config.max_uri_handlers = 40;
+    server_config.max_uri_handlers = 42;
     server_config.stack_size = STATUS_HTTP_TASK_STACK_SIZE;
     server_config.lru_purge_enable = true;
     err = httpd_start(&s_status_server, &server_config);
@@ -2736,6 +2744,8 @@ void app_start_status_server(const app_config_t *config,
         (err = httpd_register_uri_handler(s_status_server, &status_login_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_device_info_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &ota_status_uri)) != ESP_OK ||
+        (err = register_protected_uri(s_status_server, &security_status_uri)) != ESP_OK ||
+        (err = httpd_register_uri_handler(s_status_server, &security_script_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &ota_check_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &ota_install_uri)) != ESP_OK ||
         (err = httpd_register_uri_handler(s_status_server, &ota_script_uri)) != ESP_OK ||
@@ -2859,10 +2869,12 @@ void app_start_provisioning(void)
     configure_captive_portal_dhcp(ap_netif);
 
     httpd_config_t server_config = HTTPD_DEFAULT_CONFIG();
-    server_config.max_uri_handlers = 11;
+    server_config.max_uri_handlers = 13;
     server_config.stack_size = 10240;
     ESP_ERROR_CHECK(httpd_start(&s_provision_server, &server_config));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &provision_page_uri));
+    ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &security_status_uri));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(s_provision_server, &security_script_uri));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &logo_uri));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &favicon_ico_uri));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &traffic_light_uri));

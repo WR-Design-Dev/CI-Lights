@@ -33,6 +33,18 @@ Die neue Firmware bestätigt einen erfolgreichen lokalen Start nach zehn Sekunde
 ein Neustart vor dieser Bestätigung führt zur vorherigen Firmware zurück.
 Einrichtung und gespeicherte Daten bleiben bei OTA-Updates erhalten.
 
+### Standard oder Secure
+
+Der Installer wählt zunächst **Standard**: OTA-Signaturen werden geprüft,
+USB-Wiederherstellung bleibt möglich. **Secure** aktiviert beim ersten Start
+dauerhaft Hardware-Secure-Boot sowie Flash-/NVS-Verschlüsselung und sperrt
+USB-/UART-Firmware-Wiederherstellung und JTAG. Die Erstinstallation löscht alle
+Einstellungen und das Branding. Danach sind ausschließlich signierte Secure-OTA-
+Updates möglich; ein Wechsel zurück zu Standard ist ausgeschlossen.
+Die Flash-Seite erklärt diese Folgen und verlangt eine ausdrückliche Bestätigung.
+Vorher [Secure-Einrichtung, Schlüsselsicherung und Wiederherstellung](docs/secure-firmware.md)
+lesen. Die Abnahme auf einem echten Gerät steht noch aus.
+
 Die GitHub-Einrichtung, die Schlüsselsicherung und der automatische Build sind
 in [Firmware-Updates einrichten](docs/firmware-updates.md) beschrieben.
 

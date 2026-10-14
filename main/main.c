@@ -2,6 +2,7 @@
 #include "app_cpu.h"
 #include "app_ota.h"
 #include "app_settings.h"
+#include "app_security.h"
 #include "factory_reset.h"
 #include "jenkins_client.h"
 #include "cJSON.h"
@@ -31,6 +32,11 @@ void app_main(void)
     esp_log_level_set("provision", ESP_LOG_INFO);
     cJSON_Hooks json_hooks = {.malloc_fn = json_malloc, .free_fn = json_free};
     cJSON_InitHooks(&json_hooks);
+    if (!app_security_init()) {
+        traffic_light_init();
+        traffic_light_set(TRAFFIC_LIGHT_RED);
+        return;
+    }
     app_storage_init();
     app_ota_init();
     esp_err_t cpu_err = app_cpu_init();

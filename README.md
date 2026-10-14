@@ -31,6 +31,17 @@ leaves the previous firmware active. The new firmware confirms successful local
 startup after ten seconds; a reset before confirmation rolls back to the previous
 firmware. Settings and uploaded branding are preserved during OTA updates.
 
+### Standard or Secure
+
+The installer defaults to **Standard**, which verifies OTA signatures and keeps
+USB recovery available. **Secure** permanently activates hardware Secure Boot,
+flash/NVS encryption and locks USB/UART firmware recovery and JTAG on first start.
+Its first installation erases all settings and branding. Afterwards only signed
+Secure OTA updates are possible; switching back to Standard is impossible.
+The installer explains these changes and requires an explicit acknowledgement.
+Read [Secure setup, key backups and recovery](docs/secure-firmware.md) before
+provisioning a device. Hardware acceptance testing is still pending.
+
 See [firmware hosting and signing setup](docs/firmware-updates.md) for GitHub
 configuration and signing key backup instructions.
 

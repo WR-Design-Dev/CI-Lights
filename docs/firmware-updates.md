@@ -2,6 +2,12 @@
 
 Repository: `WR-Design-Dev/CI-Lights`, persönliches Konto `WR-Design-Dev`.
 
+Es gibt jetzt **Standard und Secure** mit getrennten Signier-Environments,
+Build-Verzeichnissen und Manifesten. Die folgenden bisherigen USB- und
+Schlüsselhinweise gelten für **Standard**. Secure sperrt beim ersten Start
+dauerhaft lokale Firmware-Wiederherstellung. Details, Reserve-Secrets und
+Fork-Einrichtung: [Secure-Firmware](secure-firmware.md).
+
 ## Einmalige GitHub-Einrichtung
 
 1. Den vorhandenen privaten Schlüssel `secrets/ota_signing_key.pem` separat
@@ -82,6 +88,9 @@ Ampel-Verwaltung; die SVG-Flaggen wurden aus deren Umschalter übernommen.
   öffentlichen Fingerabdruck mit dem Repository und verweigert einen anderen
   Schlüssel. Nach Build, Tests und Verpackung wird die temporäre PEM-Datei
   im Runner gelöscht.
+- Zusätzlich baut `main` die Secure-Variante mit dem aktiven Schlüssel aus
+  `secure-firmware-signing`. Beide Varianten haben dieselbe Versionsnummer.
+  K1/K2 im Environment `secure-key-recovery` werden nicht vom Build genutzt.
 - Andere Branches und Pull Requests verwenden Wegwerf-Schlüssel und haben
   keinen Zugriff auf das Produktions-Environment. Ihre Artefakte dienen für
   Entwicklungsgeräte mit USB-Flash und passen nicht zu produktiven OTA-Geräten.
@@ -108,6 +117,8 @@ Ampel-Verwaltung; die SVG-Flaggen wurden aus deren Umschalter übernommen.
 | `bootloader.bin`, `partition-table.bin`, `ota_data_initial.bin` | Einmalige vollständige USB-Installation |
 | `SHA256SUMS` | Prüfsummen der Release-Dateien |
 | `install-manifest.json` und Installationsseite | Browser-USB-Installation auf GitHub Pages |
+| `CI-Lights-Secure.bin`, `ota-manifest-secure.json` | Separater Secure-OTA-Kanal |
+| `bootloader-secure.bin`, `partition-table-secure.bin`, `ota_data_initial-secure.bin`, `install-manifest-secure.json` | Secure-Erstinstallation, vollständiges Löschen vorgeschrieben |
 
 Die Browser-Firmware liegt neben der Webseite auf Pages, damit Downloads keine
 Freigaben für andere Domains benötigen. OTA-Dateien liegen in öffentlichen

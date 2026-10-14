@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "profile": "secure",
+  "active_key": 0,
+  "keys": [
+    {
+      "index": 0,
+      "spki_sha256": "af2d11c539330b58d9fe7dc98c620ed072ff7acc9b489e6d15ce4f6dcb8fc864",
+      "efuse_digest": "a2ba7fd1823df5d8cf4e5a80d0d9ec1c922374511a20fca8c109c1ed3c78dde0"
+    },
+    {
+      "index": 1,
+      "spki_sha256": "f5c10464940cfdb45031bd81f187470a46e5156573510562e07c4d98fd641b71",
+      "efuse_digest": "3d22086bb43b21630cbd69fb625e705e7b1691d8be4bdfde3dae78d317bebe6e"
+    },
+    {
+      "index": 2,
+      "spki_sha256": "fea138d6b60c4f4079719240b48caa8b6e949ddc916606f231c9c353ab04e995",
+      "efuse_digest": "449447335d9e3f7af2436b49076c1dfa80e8ed2b1e3ff220ece9abef01f66bd4"
+    }
+  ]
+}

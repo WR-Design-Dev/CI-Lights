@@ -6,7 +6,7 @@
 
 #include "esp_err.h"
 
-#define APP_BRANDING_MAX_BYTES (0x8000 - 20)
+#define APP_BRANDING_MAX_BYTES (0x8000 - 32)
 
 typedef enum {
     APP_BRANDING_LOGO,

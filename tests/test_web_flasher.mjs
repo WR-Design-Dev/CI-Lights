@@ -19,6 +19,14 @@ const manifest = {schema: 1, name: 'CI-Lights', version: '1.0.1001', layout: '4m
     sha256: Buffer.from(await webcrypto.subtle.digest('SHA-256', bytes)).toString('hex'),
   })))}]};
 const base = new URL('https://wr-design-dev.github.io/CI-Lights/install-manifest.json');
+const secureNames = ['bootloader-secure.bin', 'partition-table-secure.bin', 'ota_data_initial-secure.bin', 'CI-Lights-Secure.bin'];
+const secureManifest = structuredClone(manifest);
+Object.assign(secureManifest, {schema: 2, profile: 'secure', name: 'CI-Lights-Secure', layout: '4mb-secure-v1',
+  erase_required: true, ota_only: true, bootloader_signatures: 3});
+secureManifest.builds[0].parts.forEach((part, index) => {
+  part.path = `firmware/v1.0.1001/secure/${secureNames[index]}`;
+  part.offset = [0, 0x10000, 0x18000, 0x20000][index];
+});
 let unsubscribe;
 
 assert.deepEqual(Object.keys(messages.en).sort(), Object.keys(messages.de).sort());
@@ -32,7 +40,7 @@ for (const name of ['index.html', 'impressum.html', 'datenschutz.html']) {
   }
 }
 
-function setup({corrupt = false, firmware = true, chip = 'ESP32-S3', sizeId = 0x16,
+function setup({corrupt = false, firmware = true, chip = 'ESP32-S3', sizeId = 0x16, registers = {}, writeFailure = false,
                 secure = true, consent = true, query = ''} = {}) {
   unsubscribe?.();
   const events = [];
@@ -44,7 +52,8 @@ function setup({corrupt = false, firmware = true, chip = 'ESP32-S3', sizeId = 0x
       addEventListener(name, fn) { this[name] = fn; }};
   }
   for (const id of ['firmware-version', 'installer-status', 'connect', 'flash', 'disconnect',
-    'erase-device', 'flash-controls', 'erase', 'flash-progress', 'release-link']) {
+    'erase-device', 'flash-controls', 'erase', 'flash-progress', 'release-link',
+    'firmware-profile', 'profile-description', 'secure-confirmation', 'confirm-secure']) {
     elements.set(`#${id}`, element());
   }
   const en = element({'data-language': 'en'});
@@ -73,15 +82,19 @@ function setup({corrupt = false, firmware = true, chip = 'ESP32-S3', sizeId = 0x
   }
   class ESPLoader {
     constructor() {
-      this.chip = {CHIP_NAME: chip};
+      this.chip = {CHIP_NAME: chip, async getMajorChipVersion() { return 0; }, async getMinorChipVersion() { return 3; },
+        async getFlashCap() { return 2; }, async getPsramCap() { return 2; }};
       this.DETECTED_FLASH_SIZES = {0x15: '2MB', 0x16: '4MB'};
     }
     async main() { events.push('detect'); }
     async readFlashId() { return (sizeId << 16) | 0x2046; }
+    async readReg(address) { return registers[address] || 0; }
     flashSizeBytes(size) { return parseInt(size) * 1024 * 1024; }
     async eraseFlash() { events.push('erase'); }
     async writeFlash(options) {
       events.push(options);
+      assert.equal(typeof options.calculateMD5Hash, 'function');
+      if (writeFailure) throw new Error('Flash verification failed');
       options.fileArray.forEach((file, index) => options.reportProgress(index, file.data.length, file.data.length));
     }
     async after() { events.push('reset'); }
@@ -90,7 +103,8 @@ function setup({corrupt = false, firmware = true, chip = 'ESP32-S3', sizeId = 0x
     const url = String(input);
     events.push(url);
     if (url.endsWith('install-manifest.json')) return {ok: firmware, json: async () => structuredClone(manifest)};
-    const index = names.findIndex(name => url.endsWith('/' + name));
+    if (url.endsWith('install-manifest-secure.json')) return {ok: firmware, json: async () => structuredClone(secureManifest)};
+    const index = [...names, ...secureNames].findIndex(name => url.endsWith('/' + name)) % 4;
     const bytes = data[index].slice();
     if (corrupt && index === 3) bytes[1] ^= 1;
     return {ok: true, arrayBuffer: async () => bytes.buffer};
@@ -208,5 +222,39 @@ assert.equal(app.events.length, 0);
 await app.click('language-de');
 assert.match(app.elements.get('#firmware-version').textContent, /nicht verfügbar/);
 assert.match(app.elements.get('#installer-status').textContent, /Bitte diese Seite/);
+app = setup();
+await app.settle();
+app.elements.get('#firmware-profile').value = 'secure';
+await app.elements.get('#firmware-profile').change();
+await app.click('connect');
+assert.equal(app.elements.get('#erase').checked, true);
+assert.equal(app.elements.get('#erase').disabled, true);
+assert.equal(app.elements.get('#erase-device').disabled, true);
+assert.equal(app.elements.get('#flash').disabled, true, 'Secure did not require explicit acknowledgement');
+await app.click('flash');
+assert.equal(app.events.some(event => event.fileArray), false);
+app.elements.get('#confirm-secure').checked = true;
+await app.elements.get('#confirm-secure').change();
+await app.click('flash');
+assert.match(app.events.find(event => event.confirmation).confirmation, /cannot be undone/);
+assert.equal(app.events.includes('erase'), true);
+assert.deepEqual(app.events.find(event => event.fileArray).fileArray.map(file => file.address), [0x10000, 0x18000, 0x20000, 0]);
+assert.match(app.elements.get('#installer-status').textContent, /Files transferred/);
+assert.doesNotMatch(app.elements.get('#installer-status').textContent, /successfully secured/i);
+app = setup({registers: {[0x60007038]: 1 << 20}});
+await app.click('connect');
+assert.equal(app.elements.get('#flash').disabled, true);
+assert.equal(app.events.includes('erase'), false);
+assert.equal(app.events.some(event => event.fileArray), false);
+app = setup({writeFailure: true});
+await app.settle();
+app.elements.get('#firmware-profile').value = 'secure';
+await app.elements.get('#firmware-profile').change();
+await app.click('connect');
+app.elements.get('#confirm-secure').checked = true;
+await app.elements.get('#confirm-secure').change();
+await app.click('flash');
+assert.equal(app.events.includes('hard_reset'), false, 'Failed writes must not trigger security activation');
+assert.match(app.elements.get('#installer-status').textContent, /verification failed/);
 unsubscribe?.();
 console.log('Browser installer checks passed: English default, German flag switch, language links, translated status and confirmation, preserved settings, optional erase and SHA-256.');

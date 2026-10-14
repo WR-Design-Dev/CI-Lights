@@ -1,4 +1,5 @@
 #include "app_ota.h"
+#include "app_security.h"
 
 #include <inttypes.h>
 #include <stdint.h>
@@ -23,7 +24,7 @@
 #include "mbedtls/md.h"
 #include "sdkconfig.h"
 
-#if !CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT || !CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
+#if !CONFIG_SECURE_SIGNED_ON_UPDATE || !CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
 #error "CI-Lights OTA requires signed updates and boot rollback"
 #endif
 
@@ -32,9 +33,14 @@
 #define OTA_HTTP_URL_LIMIT 4096U
 #define OTA_URL_LIMIT 512U
 #define OTA_VERSION_LIMIT 32U
-#define OTA_LAYOUT "4mb-ota-v1"
 #define OTA_REPOSITORY CONFIG_APP_OTA_GITHUB_REPOSITORY
+#if CONFIG_APP_SECURITY_SECURE
+#define OTA_MANIFEST_URL "https://github.com/" OTA_REPOSITORY "/releases/latest/download/ota-manifest-secure.json"
+#define OTA_IMAGE_NAME "CI-Lights-Secure.bin"
+#else
 #define OTA_MANIFEST_URL "https://github.com/" OTA_REPOSITORY "/releases/latest/download/ota-manifest.json"
+#define OTA_IMAGE_NAME "CI-Lights.bin"
+#endif
 
 typedef struct {
     char version[OTA_VERSION_LIMIT];
@@ -140,6 +146,7 @@ static esp_err_t parse_manifest(const char *body, ota_manifest_t *manifest)
     const char *project = json_string(json, "project");
     const char *chip = json_string(json, "chip");
     const char *layout = json_string(json, "layout");
+    const char *profile = json_string(json, "profile");
     const char *url = json_string(json, "url");
     const char *sha256 = json_string(json, "sha256");
     const cJSON *schema = cJSON_GetObjectItemCaseSensitive(json, "schema");
@@ -149,15 +156,17 @@ static esp_err_t parse_manifest(const char *body, ota_manifest_t *manifest)
     esp_err_t err = ESP_ERR_INVALID_RESPONSE;
     if (!cJSON_IsObject(json) || !cJSON_IsNumber(schema) || schema->valuedouble != 1 ||
         !parse_version(version, version_parts) || project == NULL ||
-        strcmp(project, "CI-Lights") != 0 || chip == NULL || strcmp(chip, "esp32s3") != 0 ||
-        layout == NULL || strcmp(layout, OTA_LAYOUT) != 0 || url == NULL ||
+        strcmp(project, app_security_project()) != 0 || chip == NULL || strcmp(chip, "esp32s3") != 0 ||
+        (profile != NULL && strcmp(profile, app_security_profile()) != 0) ||
+        (CONFIG_APP_SECURITY_SECURE && profile == NULL) ||
+        layout == NULL || strcmp(layout, app_security_layout()) != 0 || url == NULL ||
         strlen(url) >= sizeof(manifest->url) || sha256 == NULL || strlen(sha256) != 64 ||
         !cJSON_IsNumber(size) || !(size->valuedouble >= 4096 && size->valuedouble <= OTA_SLOT_SIZE) ||
         size->valuedouble != (uint32_t) size->valuedouble) {
         goto done;
     }
     int length = snprintf(expected_url, sizeof(expected_url),
-                          "https://github.com/" OTA_REPOSITORY "/releases/download/v%s/CI-Lights.bin",
+                          "https://github.com/" OTA_REPOSITORY "/releases/download/v%s/" OTA_IMAGE_NAME,
                           version);
     if (length < 0 || length >= sizeof(expected_url) || strcmp(url, expected_url) != 0) {
         goto done;
@@ -338,7 +347,7 @@ static esp_err_t download_image(const ota_manifest_t *manifest)
         memchr(description.version, '\0', sizeof(description.version)) == NULL ||
         memchr(description.project_name, '\0', sizeof(description.project_name)) == NULL ||
         strcmp(description.version, manifest->version) != 0 ||
-        strcmp(description.project_name, "CI-Lights") != 0) {
+        strcmp(description.project_name, app_security_project()) != 0) {
         err = ESP_ERR_INVALID_RESPONSE;
         goto done;
     }
@@ -436,7 +445,7 @@ void app_ota_init(void)
     const esp_partition_t *ota0 = esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, NULL);
     const esp_partition_t *ota1 = esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, NULL);
     const esp_partition_t *data = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_OTA, NULL);
-    s_status.configured = esp_flash_get_physical_size(NULL, &physical_size) == ESP_OK && physical_size >= 0x400000 &&
+    s_status.configured = app_security_ready() && esp_flash_get_physical_size(NULL, &physical_size) == ESP_OK && physical_size >= 0x400000 &&
                           ota0 != NULL && ota1 != NULL && data != NULL &&
                           ota0->address == 0x20000 && ota1->address == 0x200000 &&
                           ota0->size == OTA_SLOT_SIZE && ota1->size == OTA_SLOT_SIZE && data->size == 0x2000;
@@ -455,6 +464,8 @@ static void boot_validation_task(void *argument)
         ESP_LOGE(TAG, "Startprüfung konnte nicht bestätigt werden: %s", esp_err_to_name(err));
         esp_ota_mark_app_invalid_rollback_and_reboot();
     } else {
+        esp_err_t policy_err = app_security_apply_key_policy();
+        if (policy_err != ESP_OK) ESP_LOGE(TAG, "Signierschluesselwechsel fehlgeschlagen: %s", esp_err_to_name(policy_err));
         portENTER_CRITICAL(&s_status_lock);
         s_status.boot_pending = false;
         s_status.phase = "idle";
@@ -466,7 +477,15 @@ static void boot_validation_task(void *argument)
 
 void app_ota_confirm_startup(bool web_server_ready)
 {
-    if (!s_status.boot_pending || s_boot_validation_started) return;
+    if (s_boot_validation_started) return;
+    if (!s_status.boot_pending) {
+        if (web_server_ready && s_status.configured) {
+            s_boot_validation_started = true;
+            esp_err_t err = app_security_apply_key_policy();
+            if (err != ESP_OK) ESP_LOGE(TAG, "Signierschluesselwechsel fehlgeschlagen: %s", esp_err_to_name(err));
+        }
+        return;
+    }
     if (!web_server_ready || !s_status.configured ||
         heap_caps_get_total_size(MALLOC_CAP_SPIRAM) < 1024 * 1024 ||
         xTaskCreate(boot_validation_task, "ota_boot_check", 4096, NULL, 4, NULL) != pdPASS) {
@@ -497,6 +516,12 @@ esp_err_t app_ota_status_handler(httpd_req_t *request)
         cJSON_AddBoolToObject(json, "configured", status.configured) == NULL) {
         cJSON_Delete(json);
         return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "Nicht genug Speicher.");
+    }
+    cJSON *security = app_security_status_json();
+    if (security == NULL || !cJSON_AddItemToObject(json, "security", security)) {
+        cJSON_Delete(security);
+        cJSON_Delete(json);
+        return ESP_ERR_NO_MEM;
     }
     char *body = cJSON_PrintUnformatted(json);
     cJSON_Delete(json);

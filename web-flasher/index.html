@@ -26,6 +26,14 @@
       <div><p class="eyebrow" data-i18n="installEyebrow">First installation</p><h2 id="install-title" data-i18n="installTitle">Connect. Install. Ready.</h2><p data-i18n="installRequirements">You need a USB data cable and a browser with Web Serial, such as Chrome or Edge on a computer.</p></div>
       <div class="install-action">
         <p class="version">Firmware <strong id="firmware-version" data-i18n="loading">loading …</strong></p>
+        <label class="profile-label" for="firmware-profile" data-i18n="profileLabel">Firmware variant</label>
+        <select id="firmware-profile">
+          <option value="standard" data-i18n="profileStandard">Standard — USB reinstallation available</option>
+          <option value="secure" data-i18n="profileSecure">Secure — permanent protection, OTA updates only</option>
+        </select>
+        <p id="profile-description" class="erase-help" data-i18n="standardDescription">Signed updates, with USB recovery available.</p>
+        <a class="security-explanation-link" href="#security-explained" data-i18n="securityLearnMore">Read what Secure changes before installing</a>
+        <label id="secure-confirmation" class="erase-option" hidden><input id="confirm-secure" type="checkbox"> <span data-i18n="secureAcknowledgement">I accept permanent protection, erased settings and OTA-only updates without USB recovery.</span></label>
         <button id="connect" class="install-button" type="button" disabled><span data-i18n="connectButton">Connect device via USB</span> <span aria-hidden="true">↗</span></button>
         <div id="flash-controls" hidden>
           <label class="erase-option"><input id="erase" type="checkbox"> <span data-i18n="eraseOption">Erase all device data</span></label>
@@ -39,6 +47,28 @@
         <p class="privacy-note" data-i18n-html="privacyNote">“Connect” loads esptool-js from unpkg.com. USB communication stays local in your browser. <a href="datenschutz.html">Privacy notice</a></p>
         <a id="release-link" href="https://github.com/WR-Design-Dev/CI-Lights/releases" target="_blank" rel="noopener" data-i18n="releases">Releases and downloads</a>
       </div>
+    </section>
+    <section id="security-explained" class="security-info" aria-labelledby="security-title">
+      <p class="eyebrow" data-i18n="securityEyebrow">Choose before the first installation</p>
+      <h2 id="security-title" data-i18n="securityTitle">What does Secure firmware do?</h2>
+      <p class="security-test-status" data-i18n="securityTestStatus">Secure is awaiting acceptance testing on a physical device. Use a device you can spare for the first activation test.</p>
+      <p data-i18n="securityIntro">Standard checks signed OTA updates and allows USB reinstallation. Secure adds hardware protection, which becomes permanent when the device starts for the first time.</p>
+      <h3 data-i18n="securityProtectsTitle">What it protects</h3>
+      <ul>
+        <li data-i18n-html="securityBoot"><strong>Authentic firmware:</strong> Secure Boot verifies the bootloader and firmware on every start. Firmware signed with an untrusted key cannot start.</li>
+        <li data-i18n-html="securityFlash"><strong>Encrypted storage:</strong> Firmware and branding are encrypted in flash. Wi-Fi passwords, Jenkins tokens and other settings are protected by NVS encryption. Each device generates its own encryption keys locally; they are not sent to GitHub or this website.</li>
+        <li data-i18n-html="securityDebug"><strong>Locked physical access:</strong> JTAG debugging and the USB/UART ROM download mode are permanently disabled. BOOT, RESET or erasing the flash cannot remove this protection.</li>
+        <li data-i18n-html="securityUpdates"><strong>Verified wireless updates:</strong> Updates use the separate Secure release channel and require a trusted signature. Two firmware slots allow a failed application update to roll back to the previous working firmware.</li>
+      </ul>
+      <div class="security-permanent">
+        <h3 data-i18n="securityPermanentTitle">This choice cannot be undone</h3>
+        <p data-i18n="securityPermanent">The first installation erases all settings and branding. On first start, the device programs permanent hardware security settings (eFuses). Afterwards you cannot switch back to Standard, install your own unsigned firmware, or recover the device by USB, UART or JTAG.</p>
+        <p data-i18n="securityRecovery">Future updates require working device administration and firmware signed with a key trusted by this device. If neither firmware slot can start, there is no USB recovery. A settings reset remains possible through the supported device functions, but does not remove protection.</p>
+      </div>
+      <h3 data-i18n="securityFirstStartTitle">During installation and first start</h3>
+      <p data-i18n="securityFirstStart">This installer checks the chip, flash size and hardware security state before writing. Already secured, partially configured or unreadable devices are refused. Keep stable power connected during installation and the first start. After startup, open the security status in device administration and check that all checks passed. A successful transfer or a disappearing USB port alone does not confirm activation.</p>
+      <p class="security-limit" data-i18n="securityLimits">This protects stored data against straightforward readout and unauthorized replacement firmware. It does not make the public firmware download secret and cannot guarantee protection against software vulnerabilities or every physical attack.</p>
+      <p><a href="https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/security/secure-boot-v2.html" target="_blank" rel="noopener noreferrer" data-i18n="securityDocumentation">Technical details: Espressif Secure Boot</a></p>
     </section>
     <section class="steps" aria-label="Setup instructions" data-i18n-aria-label="stepsLabel">
       <article><span class="step-number">01</span><h3 data-i18n="stepOneTitle">Connect your device</h3><p data-i18n="stepOneText">Connect the ESP to your computer using a USB data cable. Close any open serial monitor first.</p></article>

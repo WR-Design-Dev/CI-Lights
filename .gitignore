@@ -22,6 +22,7 @@
 # Build artifacts and directories
 **/build/
 build/
+/build-*/
 *.o
 *.a
 *.out
@@ -29,6 +30,7 @@ build/
 
 # ESP-IDF specific build outputs
 *.bin
+!/security/secure-bootloader.bin
 *.elf
 *.map
 flasher_args.json # Generated in build directory

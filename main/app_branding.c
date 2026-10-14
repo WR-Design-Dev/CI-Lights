@@ -6,7 +6,8 @@
 
 #define BRANDING_PARTITION_SIZE 0x20000
 #define BRANDING_SLOT_SIZE 0x8000
-#define BRANDING_MAGIC 0x424E4431u
+#define BRANDING_MAGIC_V1 0x424E4431u
+#define BRANDING_MAGIC 0x424E4432u
 #define BRANDING_SUBTYPE 0x40
 
 typedef struct {
@@ -15,9 +16,15 @@ typedef struct {
     uint32_t length;
     uint32_t crc32;
     uint32_t format;
+    uint32_t reserved[3];
 } branding_header_t;
 
-_Static_assert(sizeof(branding_header_t) == 20, "Branding header size changed");
+_Static_assert(sizeof(branding_header_t) == 32, "Branding header must be encryption aligned");
+
+static size_t header_size(const branding_header_t *header)
+{
+    return header->magic == BRANDING_MAGIC_V1 ? 20 : sizeof(*header);
+}
 
 typedef struct {
     branding_header_t header;
@@ -55,14 +62,14 @@ static bool read_valid_slot(const esp_partition_t *partition, size_t offset,
                             app_branding_kind_t kind, branding_header_t *header)
 {
     if (esp_partition_read(partition, offset, header, sizeof(*header)) != ESP_OK ||
-        header->magic != BRANDING_MAGIC || header->generation == 0 ||
-        header->length == 0 || header->length > APP_BRANDING_MAX_BYTES ||
+        (header->magic != BRANDING_MAGIC && header->magic != BRANDING_MAGIC_V1) || header->generation == 0 ||
+        header->length == 0 || header->length > BRANDING_SLOT_SIZE - header_size(header) ||
         !allowed_format(kind, header->format)) {
         return false;
     }
     uint8_t chunk[512];
     size_t remaining = header->length;
-    size_t position = offset + sizeof(*header);
+    size_t position = offset + header_size(header);
     uint32_t crc = 0xffffffffu;
     while (remaining > 0) {
         size_t count = remaining < sizeof(chunk) ? remaining : sizeof(chunk);
@@ -120,7 +127,7 @@ esp_err_t app_branding_read(app_branding_kind_t kind, void *buffer, size_t lengt
     if (buffer == NULL || length != slot.header.length) {
         return ESP_ERR_INVALID_SIZE;
     }
-    return esp_partition_read(partition, slot.offset + sizeof(slot.header), buffer, length);
+    return esp_partition_read(partition, slot.offset + header_size(&slot.header), buffer, length);
 }
 
 esp_err_t app_branding_save(app_branding_kind_t kind, app_branding_format_t format,
@@ -142,9 +149,14 @@ esp_err_t app_branding_save(app_branding_kind_t kind, app_branding_format_t form
     if (err != ESP_OK) {
         return err;
     }
-    err = esp_partition_write(partition, target + sizeof(branding_header_t), data, length);
-    if (err != ESP_OK) {
-        return err;
+    for (size_t offset = 0; offset < length; offset += 512) {
+        uint8_t chunk[512];
+        size_t count = length - offset < sizeof(chunk) ? length - offset : sizeof(chunk);
+        memset(chunk, 0xff, sizeof(chunk));
+        memcpy(chunk, (const uint8_t *) data + offset, count);
+        err = esp_partition_write(partition, target + sizeof(branding_header_t) + offset,
+                                  chunk, (count + 15u) & ~15u);
+        if (err != ESP_OK) return err;
     }
     branding_header_t header = {
         .magic = BRANDING_MAGIC,

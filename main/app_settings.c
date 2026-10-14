@@ -1,4 +1,6 @@
 #include "app_settings.h"
+#include "app_security.h"
+#include "esp_partition.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -229,10 +231,36 @@ bool app_config_jenkins_is_valid(const app_config_t *config)
            config->jenkins_user[0] != '\0' && config->jenkins_token[0] != '\0';
 }
 
+#if CONFIG_APP_SECURITY_SECURE
+static bool nvs_partition_is_erased(void)
+{
+    const esp_partition_t *partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+                                                               ESP_PARTITION_SUBTYPE_DATA_NVS, "nvs");
+    if (partition == NULL) return false;
+    uint8_t data[256];
+    for (size_t offset = 0; offset < partition->size; offset += sizeof(data)) {
+        if (esp_partition_read(partition, offset, data, sizeof(data)) != ESP_OK) return false;
+        for (size_t i = 0; i < sizeof(data); ++i) if (data[i] != 0xff) return false;
+    }
+    return true;
+}
+#endif
+
 void app_storage_init(void)
 {
+#if CONFIG_APP_SECURITY_SECURE
+    const esp_partition_t *keys = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+                                                          ESP_PARTITION_SUBTYPE_DATA_NVS_KEYS, "nvs_keys");
+    nvs_sec_cfg_t security;
+    ESP_ERROR_CHECK(keys != NULL ? ESP_OK : ESP_ERR_NOT_FOUND);
+    esp_err_t key_err = nvs_flash_read_security_cfg(keys, &security);
+    mbedtls_platform_zeroize(&security, sizeof(security));
+    /* Generate only for a fresh empty store. Never silently replace lost keys. */
+    ESP_ERROR_CHECK(key_err == ESP_ERR_NVS_KEYS_NOT_INITIALIZED && nvs_partition_is_erased() ? ESP_OK : key_err);
+#endif
     esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    if (!CONFIG_APP_SECURITY_SECURE &&
+        (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
     }

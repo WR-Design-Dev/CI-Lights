@@ -24,11 +24,15 @@ rem      Andere Werkzeugablage vorher setzen: set "IDF_TOOLS_PATH=C:\Pfad\Tools"
 rem      Bei abweichender Python-venv: set "IDF_PYTHON_ENV_PATH=C:\Pfad\venv"
 rem   5. Originalen privaten OTA-Schlüssel aus dem eigenen Backup nach
 rem      secrets\ota_signing_key.pem kopieren. Niemals einen neuen erzeugen!
+rem      Secure verwendet secrets\K0.pem.dpapi (bzw. den später aktiven K1/K2).
+rem      Beide Profile und der bereits freigegebene öffentliche Bootloader sind erforderlich.
 rem      Zum Bauen NUR auf GitHub genügt stattdessen -SkipLocalBuild.
 rem
 rem GitHub muss bereits wie für dieses Projekt eingerichtet sein:
 rem   - Repository WR-Design-Dev/CI-Lights, Branch main und Workflow firmware.yml.
 rem   - Environment firmware-signing mit Secret OTA_SIGNING_KEY_PEM (nur main).
+rem   - Environment secure-firmware-signing mit SECURE_SIGNING_KEY_PEM (nur main).
+rem   - Reserve-Secrets in secure-key-recovery werden vom Build nicht benutzt.
 rem   - GitHub Pages: Quelle "GitHub Actions"; Actions darf Releases schreiben.
 rem   Der Secret-Wert und Zugangstokens gehören NIEMALS in dieses Skript.
 rem

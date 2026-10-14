@@ -1,5 +1,21 @@
 // German source strings are also the fallback when the language API is unavailable.
 const uiTranslations = new Map([
+  ["Sicherheitsstatus", "Security status"],
+  ["Sicherheitsstatus wird geladen.", "Loading security status."],
+  ["Sicherheitsbericht öffnen", "Open security report"],
+  ["Sicherheitsstatus konnte nicht geladen werden.", "Could not load the security status."],
+  ["Profil", "Profile"],
+  ["aktiv", "enabled"],
+  ["inaktiv", "disabled"],
+  ["Flash-Verschlüsselung", "Flash encryption"],
+  ["NVS-Verschlüsselung", "NVS encryption"],
+  ["USB-/UART-Updates gesperrt", "USB/UART updates blocked"],
+  ["Prüfung", "Verification"],
+  ["bestanden", "passed"],
+  ["fehlgeschlagen", "failed"],
+  ["widerrufene Schlüssel", "revoked keys"],
+  ["Schlüsselwechsel wartet auf ein weiteres bestätigtes Update mit dem neuen Schlüssel.", "Key rotation is waiting for another confirmed update signed by the new key."],
+
   ['Firmware-Updates', 'Firmware updates'],
   ['Die Update-Anfrage hat zu lange gedauert.', 'The update request timed out.'],
   ['Installiere eine neue Firmware direkt über WLAN. Die Ampel startet danach neu.', 'Install new firmware over Wi-Fi. The traffic light restarts afterwards.'],
