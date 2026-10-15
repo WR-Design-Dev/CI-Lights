@@ -240,7 +240,7 @@ Object.assign(messages.de, {
   "confirmSecureInstall": "Gesicherte Firmware {version} installieren, ALLE Daten löschen und beim ersten Start USB-/UART-Firmware-Wiederherstellung dauerhaft sperren? Dies ist nicht umkehrbar. Stabile Stromversorgung angeschlossen lassen.",
   "secureTransferred": "Dateien übertragen und geprüft. Die Ampel startet die dauerhafte Absicherung. Stromversorgung angeschlossen lassen. Sicherheitsstatus in der Geräteverwaltung prüfen; ein verschwundener USB-Port bestätigt die Absicherung nicht.",
   "secureTransferredManualReset": "Dateien übertragen und geprüft. RESET drücken, um die dauerhafte Absicherung zu starten. Stromversorgung angeschlossen lassen und den Sicherheitsstatus in der Geräteverwaltung prüfen.",
-  "secureEraseRequired": "Die Secure-Erstinstallation erfordert das Löschen des gesamten Flashs.",
+  "secureEraseRequired": "Die Erstinstallation der gesicherten Firmware erfordert das Löschen des gesamten Flashs.",
   "deviceSecured": "Dieses Gerät ist bereits gesichert oder teilweise verschlüsselt. USB-Installation und Löschen sind gesperrt. Signierte OTA-Updates der Ampel verwenden.",
   "securityPartial": "Sicherheitsschlüssel oder dauerhafte Sicherheitseinstellungen sind bereits vorhanden. Installation und Löschen sind gesperrt.",
   "securityUnknown": "Der vollständige Sicherheitszustand konnte nicht geprüft werden. Es wird nichts geschrieben oder gelöscht."
@@ -270,17 +270,17 @@ Object.assign(messages.en, {
 });
 
 Object.assign(messages.de, {
-  "unsupportedSecureBoard": "Secure benötigt den freigegebenen ESP32-S3-Zero mit ESP32-S3FH4R2-Chip (4 MiB Flash, 2 MiB Quad-PSRAM). Es wurde nichts geschrieben oder gelöscht.",
-  "securityLearnMore": "Vor der Installation nachlesen, was Secure verändert",
+  "unsupportedSecureBoard": "Die gesicherte Variante benötigt den freigegebenen ESP32-S3-Zero mit ESP32-S3FH4R2-Chip (4 MiB Flash, 2 MiB Quad-PSRAM). Es wurde nichts geschrieben oder gelöscht.",
+  "securityLearnMore": "Vor der Installation nachlesen, was die gesicherte Variante verändert",
   "securityEyebrow": "Vor der Erstinstallation entscheiden",
-  "securityTitle": "Was bewirkt die Secure-Firmware?",
-  "securityTestStatus": "Die Abnahme von Secure auf einem echten Gerät steht noch aus. Verwende für den ersten Aktivierungstest eine entbehrliche Ampel.",
-  "securityIntro": "Standard prüft signierte OTA-Updates und erlaubt eine USB-Neuinstallation. Secure ergänzt Schutz durch die Hardware, der beim ersten Start dauerhaft aktiviert wird.",
+  "securityTitle": "Was bewirkt die gesicherte Firmware?",
+  "securityTestStatus": "Die Abnahme der gesicherten Firmware auf einem echten Gerät steht noch aus. Verwende für den ersten Aktivierungstest eine entbehrliche Ampel.",
+  "securityIntro": "Standard prüft signierte OTA-Updates und erlaubt eine USB-Neuinstallation. Die gesicherte Variante ergänzt Schutz durch die Hardware, der beim ersten Start dauerhaft aktiviert wird.",
   "securityProtectsTitle": "Was geschützt wird",
   "securityBoot": "<strong>Echte Firmware:</strong> Secure Boot prüft bei jedem Start den Bootloader und die Firmware. Mit einem nicht vertrauenswürdigen Schlüssel signierte Firmware kann nicht starten.",
   "securityFlash": "<strong>Verschlüsselter Speicher:</strong> Firmware und Branding werden im Flash verschlüsselt. WLAN-Passwörter, Jenkins-Token und andere Einstellungen sind durch NVS-Verschlüsselung geschützt. Jede Ampel erzeugt ihre eigenen Verschlüsselungsschlüssel lokal; sie werden weder an GitHub noch an diese Website übertragen.",
   "securityDebug": "<strong>Gesperrte physische Zugänge:</strong> JTAG-Debugging und der USB-/UART-ROM-Downloadmodus werden dauerhaft deaktiviert. BOOT, RESET oder das Löschen des Flashs können diesen Schutz nicht entfernen.",
-  "securityUpdates": "<strong>Geprüfte Funk-Updates:</strong> Updates nutzen einen eigenen Secure-Veröffentlichungskanal und benötigen eine vertrauenswürdige Signatur. Zwei Firmware-Partitionen erlauben bei einem fehlgeschlagenen Anwendungsupdate die Rückkehr zur vorherigen funktionierenden Firmware.",
+  "securityUpdates": "<strong>Geprüfte Funk-Updates:</strong> Updates nutzen einen eigenen Veröffentlichungskanal für gesicherte Firmware und benötigen eine vertrauenswürdige Signatur. Zwei Firmware-Partitionen erlauben bei einem fehlgeschlagenen Anwendungsupdate die Rückkehr zur vorherigen funktionierenden Firmware.",
   "securityPermanentTitle": "Diese Entscheidung lässt sich nicht rückgängig machen",
   "securityPermanent": "Die Erstinstallation löscht alle Einstellungen und das Branding. Beim ersten Start programmiert die Ampel dauerhafte Sicherheitseinstellungen in der Hardware (eFuses). Danach kannst du weder zu Standard zurückwechseln noch eigene unsignierte Firmware installieren oder die Ampel über USB, UART oder JTAG wiederherstellen.",
   "securityRecovery": "Spätere Updates benötigen eine funktionierende Ampel-Verwaltung und Firmware mit einem auf diesem Gerät vertrauenswürdigen Signierschlüssel. Wenn keine der beiden Firmware-Partitionen mehr startet, gibt es keine USB-Wiederherstellung. Einstellungen lassen sich weiterhin über die vorgesehenen Gerätefunktionen zurücksetzen; der Schutz bleibt dabei aktiv.",
@@ -288,6 +288,6 @@ Object.assign(messages.de, {
   "securityFirstStart": "Der Installer prüft vor dem Schreiben den Chip, die Flash-Größe und den Sicherheitszustand der Hardware. Bereits gesicherte, teilweise eingerichtete oder nicht vollständig prüfbare Geräte werden abgewiesen. Lass während der Installation und des ersten Starts eine stabile Stromversorgung angeschlossen. Öffne danach den Sicherheitsstatus in der Ampel-Verwaltung und prüfe, ob alle Prüfungen bestanden sind. Eine erfolgreiche Dateiübertragung oder ein verschwundener USB-Port allein bestätigt die Aktivierung nicht.",
   "securityLimits": "Dieser Schutz erschwert das einfache Auslesen gespeicherter Daten und das Einschleusen fremder Firmware. Der öffentliche Firmware-Download bleibt öffentlich. Schutz vor Softwarefehlern oder jedem aufwendigen physischen Angriff ist damit nicht garantiert.",
   "securityDocumentation": "Technische Details: Espressif Secure Boot",
-  "stepTwoText": "Klicke auf „Ampel per USB verbinden“, wähle den USB-Port und starte „Firmware installieren“. Falls bei einer ungesicherten Ampel keine Verbindung möglich ist: BOOT gedrückt halten, RESET kurz drücken, dann BOOT loslassen und erneut verbinden. Nach der Secure-Aktivierung ist dieser Wiederherstellungsweg dauerhaft gesperrt.",
-  "dataNote": "Bei einer USB-Neuinstallation von Standard bleiben Einstellungen erhalten, wenn die Löschoption deaktiviert ist. „Alle Gerätedaten löschen“ leert den Flash vor der Installation; „Gerät löschen“ leert ihn ohne neue Firmware. Die Secure-Erstinstallation löscht immer alle Daten. Nach der Aktivierung kann diese Seite das Gerät weder neu installieren noch löschen. Während des Schreibens, Löschens und ersten Starts die Stromversorgung angeschlossen lassen."
+  "stepTwoText": "Klicke auf „Ampel per USB verbinden“, wähle den USB-Port und starte „Firmware installieren“. Falls bei einer ungesicherten Ampel keine Verbindung möglich ist: BOOT gedrückt halten, RESET kurz drücken, dann BOOT loslassen und erneut verbinden. Nach der Aktivierung des dauerhaften Schutzes ist dieser Wiederherstellungsweg dauerhaft gesperrt.",
+  "dataNote": "Bei einer USB-Neuinstallation von Standard bleiben Einstellungen erhalten, wenn die Löschoption deaktiviert ist. „Alle Gerätedaten löschen“ leert den Flash vor der Installation; „Gerät löschen“ leert ihn ohne neue Firmware. Die Erstinstallation der gesicherten Firmware löscht immer alle Daten. Nach der Aktivierung kann diese Seite das Gerät weder neu installieren noch löschen. Während des Schreibens, Löschens und ersten Starts die Stromversorgung angeschlossen lassen."
 });

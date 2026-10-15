@@ -139,6 +139,7 @@ footer a { color: var(--muted); }
 /* Firmware variant and permanent-protection acknowledgement. */
 .profile-label { display: block; margin-top: 1rem; font-weight: 600; }
 #firmware-profile { width: 100%; max-width: 100%; margin: .5rem 0; padding: .75rem; border: 1px solid #d6d3d1; border-radius: .5rem; background: white; color: #1c1917; font: inherit; }
+.security-explanation-link { display: block; margin-bottom: 1rem; }
 #secure-confirmation { align-items: flex-start; margin: 1rem 0; line-height: 1.5; }
 .security-info { margin: 1rem 0; padding: 1.3rem; border: 1px solid var(--line); border-radius: 1rem; background: #fff; scroll-margin-top: 1rem; }
 .security-info h3 { margin-top: 1.3rem; }
