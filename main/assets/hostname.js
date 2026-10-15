@@ -35,23 +35,25 @@ window.ciLightsHostname = (() => {
   let error = '';
   let revision = 0;
   const t = text => uiI18n.t(text);
+  const needsRestart = () => state && (input.value.toLowerCase() !== state.configured || state.restart_required);
 
   function render() {
     title.textContent = t('Verwaltungsadresse (.local)');
     labelText.textContent = t('Gerätename (ohne .local)');
-    hint.textContent = t('Bis zu 32 Zeichen: Buchstaben, Ziffern und Bindestriche; kein Bindestrich am Anfang oder Ende. Leer lassen für den MAC-Standardnamen. Änderungen gelten nach einem Neustart.');
-    button.textContent = t('Gerätenamen speichern');
-    button.disabled = busy || !state;
-    input.disabled = busy || !state;
+    hint.textContent = t('Bis zu 32 Zeichen: Buchstaben, Ziffern und Bindestriche; kein Bindestrich am Anfang oder Ende. Leer lassen für den MAC-Standardnamen. Nach Bestätigung wird die Ampel neu gestartet.');
+    button.textContent = t('Gerätenamen speichern und neu starten');
     if (state) {
-      active.textContent = t('Aktuelle Adresse:');
-      address.textContent = `http://${state.active}.local`;
+      active.textContent = t(state.restarting ? 'Adresse nach dem Neustart:' : 'Aktuelle Adresse:');
+      address.textContent = `http://${state.restarting ? state.configured || state.default_name : state.active}.local`;
       address.href = address.textContent;
       if (!editing && !busy) input.value = state.configured;
     }
+    button.disabled = busy || !needsRestart() || state.restarting;
+    input.disabled = busy || !state || state.restarting;
     message.dataset.error = String(Boolean(error));
     message.textContent = error ? t('Fehler: ') + uiI18n.response(error) : !state ? t('Gerätename wird geladen.') :
-      [state.restart_required ? t('Gespeichert. Der neue Name gilt nach dem nächsten Neustart.') : '',
+      state.restarting ? t('Gespeichert. Die Ampel startet neu. Öffne danach die neue Adresse. Bei einem Namenskonflikt gilt der MAC-Standardname:') + ` ${state.default_name}.local` :
+      [state.restart_required ? t('Neustart erforderlich. Zum Anwenden den Gerätenamen speichern und neu starten.') : '',
        state.fallback_pending ? t('Wunschname bereits vergeben. Der MAC-Standardname wird aktiviert.') :
        state.fallback ? t('Wunschname bereits vergeben. Der MAC-Standardname wird verwendet.') : ''].filter(Boolean).join(' ');
   }
@@ -63,7 +65,7 @@ window.ciLightsHostname = (() => {
   }
 
   async function refresh() {
-    if (busy) return;
+    if (busy || state?.restarting) return;
     const requestedRevision = ++revision;
     try {
       const updated = await request();
@@ -76,17 +78,20 @@ window.ciLightsHostname = (() => {
     render();
   }
 
-  input.addEventListener('input', () => { editing = true; });
+  input.addEventListener('input', () => { editing = true; render(); });
   form.addEventListener('submit', async event => {
     event.preventDefault();
-    if (busy || !state || !form.reportValidity()) return;
+    if (busy || !needsRestart() || state.restarting || !form.reportValidity()) return;
     const hostname = input.value;
+    if (!window.confirm(t('Gerätenamen speichern und die Ampel neu starten? Danach ist sie unter dieser Adresse erreichbar:') +
+      `\nhttp://${hostname.toLowerCase() || state.default_name}.local\n\n` +
+      t('Bei einem Namenskonflikt verwendet sie den MAC-Standardnamen.'))) return;
     ++revision;
     busy = true;
     error = '';
     render();
     try {
-      state = await request({method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({hostname})});
+      state = await request({method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({hostname, restart: true})});
       editing = false;
     } catch (failure) { error = failure.message; }
     finally { busy = false; render(); }

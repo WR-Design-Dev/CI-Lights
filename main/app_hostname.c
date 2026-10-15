@@ -3,6 +3,7 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -12,6 +13,7 @@
 
 #define HOSTNAME_FALLBACK 1u
 #define HOSTNAME_STOP 2u
+#define HOSTNAME_RESTART 4u
 static const char *TAG = "hostname";
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static app_hostname_policy_t s_policy;
@@ -19,6 +21,7 @@ static TaskHandle_t s_worker;
 static SemaphoreHandle_t s_worker_done;
 static bool s_stopping;
 static bool s_fallback_pending;
+static bool s_restart_pending;
 
 void app_hostname_snapshot(app_hostname_policy_t *policy)
 {
@@ -52,6 +55,10 @@ static void hostname_worker(void *context)
         uint32_t events = 0;
         xTaskNotifyWait(0, UINT32_MAX, &events, portMAX_DELAY);
         if (events & HOSTNAME_STOP) break;
+        if (events & HOSTNAME_RESTART) {
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            esp_restart();
+        }
         portENTER_CRITICAL(&s_lock);
         bool pending = s_fallback_pending && !s_stopping;
         portEXIT_CRITICAL(&s_lock);
@@ -100,6 +107,7 @@ esp_err_t app_hostname_start(void)
     app_hostname_policy_init(&s_policy, app_config_get_hostname(), mac);
     s_stopping = false;
     s_fallback_pending = false;
+    s_restart_pending = false;
     err = mdns_init();
     if (err != ESP_OK) return err;
     s_worker_done = xSemaphoreCreateBinary();
@@ -115,7 +123,7 @@ esp_err_t app_hostname_start(void)
     return err;
 }
 
-esp_err_t app_hostname_get_handler(httpd_req_t *request)
+static esp_err_t hostname_response(httpd_req_t *request, bool restarting)
 {
     app_hostname_policy_t policy;
     app_hostname_snapshot(&policy);
@@ -129,6 +137,7 @@ esp_err_t app_hostname_get_handler(httpd_req_t *request)
         cJSON_AddStringToObject(json, "default_name", policy.default_name) == NULL ||
         cJSON_AddBoolToObject(json, "fallback", policy.fallback) == NULL ||
         cJSON_AddBoolToObject(json, "fallback_pending", pending) == NULL ||
+        cJSON_AddBoolToObject(json, "restarting", restarting) == NULL ||
         cJSON_AddBoolToObject(json, "restart_required", strcmp(configured, policy.configured) != 0) == NULL) {
         cJSON_Delete(json);
         return ESP_ERR_NO_MEM;
@@ -141,6 +150,11 @@ esp_err_t app_hostname_get_handler(httpd_req_t *request)
     esp_err_t err = httpd_resp_sendstr(request, body);
     free(body);
     return err;
+}
+
+esp_err_t app_hostname_get_handler(httpd_req_t *request)
+{
+    return hostname_response(request, s_restart_pending);
 }
 
 esp_err_t app_hostname_post_handler(httpd_req_t *request)
@@ -158,12 +172,33 @@ esp_err_t app_hostname_post_handler(httpd_req_t *request)
     body[received] = '\0';
     cJSON *json = cJSON_Parse(body);
     const cJSON *hostname = cJSON_GetObjectItemCaseSensitive(json, "hostname");
-    esp_err_t err = cJSON_IsString(hostname) ? app_config_save_hostname(hostname->valuestring) : ESP_ERR_INVALID_ARG;
+    char normalized[APP_HOSTNAME_MAX_LENGTH + 1];
+    bool valid = cJSON_IsString(hostname) && app_hostname_normalize(hostname->valuestring, normalized);
+    bool confirmed = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json, "restart"));
     cJSON_Delete(json);
+    if (!valid) return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Ungültiger Gerätename.");
+    if (s_restart_pending) {
+        httpd_resp_set_status(request, "409 Conflict");
+        httpd_resp_set_type(request, "text/plain; charset=utf-8");
+        return httpd_resp_sendstr(request, "Neustart wird bereits vorbereitet.");
+    }
+    app_hostname_policy_t policy;
+    app_hostname_snapshot(&policy);
+    bool restart = strcmp(normalized, policy.configured) != 0;
+    if (restart && !confirmed)
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Bitte den Neustart bestätigen.");
+    esp_err_t err = strcmp(normalized, app_config_get_hostname()) == 0 ? ESP_OK : app_config_save_hostname(normalized);
     if (err != ESP_OK) return httpd_resp_send_err(request,
         err == ESP_ERR_INVALID_ARG ? HTTPD_400_BAD_REQUEST : HTTPD_500_INTERNAL_SERVER_ERROR,
         err == ESP_ERR_INVALID_ARG ? "Ungültiger Gerätename." : "Gerätename konnte nicht gespeichert werden.");
-    return app_hostname_get_handler(request);
+    err = hostname_response(request, restart);
+    if (err == ESP_OK && restart) {
+        /* The existing worker needs no extra task allocation. Only request the
+           delayed restart once the saved settings and HTTP response succeeded. */
+        s_restart_pending = true;
+        xTaskNotify(s_worker, HOSTNAME_RESTART, eSetBits);
+    }
+    return err;
 }
 
 extern const unsigned char hostname_js_start[] asm("_binary_hostname_js_start");

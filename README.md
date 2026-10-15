@@ -32,7 +32,9 @@ startup after ten seconds; a reset before confirmation rolls back to the previou
 firmware. Settings and uploaded branding are preserved during OTA updates.
 
 Under **Wi-Fi → Administration address (.local)**, save a device name such as
-`build-light` to use `http://build-light.local` after a restart. Leave it empty
+`build-light` and confirm **Save device name and restart**. The device saves the
+name and restarts automatically, then uses `http://build-light.local`. Cancelling
+the confirmation leaves the saved name unchanged. Leave it empty
 for the default MAC name. On a detected conflict, the device falls back to its
 MAC name and displays its actual address. The requested name is kept for the
 next startup. A factory reset clears it; a restart or Wi-Fi failure does not.

@@ -34,7 +34,9 @@ ein Neustart vor dieser Bestätigung führt zur vorherigen Firmware zurück.
 Einrichtung und gespeicherte Daten bleiben bei OTA-Updates erhalten.
 
 Unter **WLAN → Verwaltungsadresse (.local)** kannst du einen Gerätenamen wie
-`build-ampel` speichern. Er gilt nach einem Neustart als `http://build-ampel.local`.
+`build-ampel` eingeben und **Gerätenamen speichern und neu starten** bestätigen.
+Die Ampel speichert den Namen und startet automatisch neu; danach gilt
+`http://build-ampel.local`. Bei Abbruch bleibt der gespeicherte Name unverändert.
 Leer lassen verwendet den bisherigen MAC-Namen. Bei einem erkannten Konflikt
 fällt die Ampel auf ihren MAC-Namen zurück und zeigt die tatsächlich verwendete
 Adresse an. Der Wunschname bleibt für den nächsten Start gespeichert. Ein
