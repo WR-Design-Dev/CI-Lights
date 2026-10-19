@@ -22,6 +22,8 @@
 #define NVS_KEY_JENKINS_USER "jenkins_user"
 #define NVS_KEY_JENKINS_TOKEN "jenkins_token"
 #define NVS_KEY_JENKINS_POLL_INTERVAL "jenkins_poll"
+#define NVS_KEY_JENKINS_LIST_TIMEOUT "jenkins_list_to"
+#define NVS_KEY_JENKINS_STATUS_TIMEOUT "jenkins_stat_to"
 #define NVS_KEY_LIGHT_BRIGHTNESS "brightness"
 #define NVS_KEY_BUILD_EFFECT "build_effect"
 #define NVS_KEY_CPU_MODE "cpu_mode"
@@ -488,6 +490,8 @@ bool app_config_load(app_config_t *config)
     }
     memset(config, 0, sizeof(*config));
     config->jenkins_poll_interval_minutes = APP_JENKINS_POLL_INTERVAL_DEFAULT_MINUTES;
+    config->jenkins_job_list_timeout_seconds = APP_JENKINS_TIMEOUT_DEFAULT_SECONDS;
+    config->jenkins_status_timeout_seconds = APP_JENKINS_TIMEOUT_DEFAULT_SECONDS;
     config->light_brightness_percent = APP_LIGHT_BRIGHTNESS_DEFAULT_PERCENT;
     config->build_effect = APP_BUILD_EFFECT_PULSE;
     config->cpu_mode = APP_CPU_MODE_FIXED_160;
@@ -550,6 +554,16 @@ bool app_config_load(app_config_t *config)
                                               &poll_interval_minutes);
     if (poll_interval_err == ESP_OK && poll_interval_minutes >= 1) {
         config->jenkins_poll_interval_minutes = poll_interval_minutes;
+    }
+
+    uint32_t timeout_seconds;
+    if (nvs_get_u32(nvs_handle, NVS_KEY_JENKINS_LIST_TIMEOUT, &timeout_seconds) == ESP_OK &&
+        app_jenkins_timeout_is_valid(timeout_seconds)) {
+        config->jenkins_job_list_timeout_seconds = timeout_seconds;
+    }
+    if (nvs_get_u32(nvs_handle, NVS_KEY_JENKINS_STATUS_TIMEOUT, &timeout_seconds) == ESP_OK &&
+        app_jenkins_timeout_is_valid(timeout_seconds)) {
+        config->jenkins_status_timeout_seconds = timeout_seconds;
     }
 
     uint8_t brightness_percent = APP_LIGHT_BRIGHTNESS_DEFAULT_PERCENT;
@@ -847,8 +861,14 @@ esp_err_t app_config_save_jenkins(const app_config_t *config)
     return err;
 }
 
-esp_err_t app_config_save_jenkins_poll_interval(uint32_t poll_interval_minutes)
+esp_err_t app_config_save_jenkins_poll_settings(uint32_t poll_interval_minutes,
+                                              uint32_t job_list_timeout_seconds,
+                                              uint32_t status_timeout_seconds)
 {
+    if (poll_interval_minutes < 1 || !app_jenkins_timeout_is_valid(job_list_timeout_seconds) ||
+        !app_jenkins_timeout_is_valid(status_timeout_seconds)) {
+        return ESP_ERR_INVALID_ARG;
+    }
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(SETTINGS_NAMESPACE, NVS_READWRITE, &nvs_handle);
     if (err != ESP_OK) {
@@ -857,6 +877,12 @@ esp_err_t app_config_save_jenkins_poll_interval(uint32_t poll_interval_minutes)
 
     err = nvs_set_u32(nvs_handle, NVS_KEY_JENKINS_POLL_INTERVAL,
                       poll_interval_minutes);
+    if (err == ESP_OK) {
+        err = nvs_set_u32(nvs_handle, NVS_KEY_JENKINS_LIST_TIMEOUT, job_list_timeout_seconds);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u32(nvs_handle, NVS_KEY_JENKINS_STATUS_TIMEOUT, status_timeout_seconds);
+    }
     if (err == ESP_OK) {
         err = nvs_commit(nvs_handle);
     }

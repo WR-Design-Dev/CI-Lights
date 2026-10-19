@@ -42,7 +42,9 @@ esp_err_t app_wifi_profiles_mark_success(uint8_t index);
 esp_err_t app_wifi_profiles_move(const char *ssid, int8_t direction);
 esp_err_t app_wifi_profiles_remove(const char *ssid);
 esp_err_t app_config_save_jenkins(const app_config_t *config);
-esp_err_t app_config_save_jenkins_poll_interval(uint32_t poll_interval_minutes);
+esp_err_t app_config_save_jenkins_poll_settings(uint32_t poll_interval_minutes,
+                                              uint32_t job_list_timeout_seconds,
+                                              uint32_t status_timeout_seconds);
 esp_err_t app_config_save_light_brightness(uint8_t percent);
 esp_err_t app_config_save_build_effect(app_build_effect_t effect);
 esp_err_t app_config_save_cpu_mode(app_cpu_mode_t mode);

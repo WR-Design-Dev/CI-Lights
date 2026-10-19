@@ -23,6 +23,7 @@ jobs:
         run: |
           node tests/test_ota_ui.js
           node tests/test_hostname_ui.js
+          node tests/test_jenkins_jobs_ui.js
           python3 tests/test_hostname_policy.py
       - name: Test USB installer and optional erase
         run: |

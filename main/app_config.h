@@ -11,7 +11,20 @@
 #define APP_JENKINS_USER_MAX_LENGTH 63
 #define APP_JENKINS_TOKEN_MAX_LENGTH 127
 #define APP_JENKINS_POLL_INTERVAL_DEFAULT_MINUTES 5
+#define APP_JENKINS_TIMEOUT_DEFAULT_SECONDS 60
+#define APP_JENKINS_TIMEOUT_MAX_SECONDS 600
 #define APP_LIGHT_BRIGHTNESS_DEFAULT_PERCENT 50
+
+static inline bool app_jenkins_timeout_is_valid(uint32_t seconds)
+{
+    return seconds >= 1 && seconds <= APP_JENKINS_TIMEOUT_MAX_SECONDS;
+}
+
+static inline uint32_t app_jenkins_timeout_ms(uint32_t seconds)
+{
+    return (app_jenkins_timeout_is_valid(seconds) ? seconds :
+            APP_JENKINS_TIMEOUT_DEFAULT_SECONDS) * 1000;
+}
 
 typedef enum {
     APP_CPU_MODE_FIXED_160,
@@ -44,6 +57,8 @@ typedef struct {
     char jenkins_user[APP_JENKINS_USER_MAX_LENGTH + 1];
     char jenkins_token[APP_JENKINS_TOKEN_MAX_LENGTH + 1];
     uint32_t jenkins_poll_interval_minutes;
+    uint32_t jenkins_job_list_timeout_seconds;
+    uint32_t jenkins_status_timeout_seconds;
     uint8_t light_brightness_percent;
     app_build_effect_t build_effect;
     app_cpu_mode_t cpu_mode;

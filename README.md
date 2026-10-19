@@ -167,12 +167,20 @@ credentials are transmitted across the network without encryption.
 First enter the Jenkins URL, Jenkins username, and Jenkins API token on the
 administration page. A dropdown then shows Jenkins jobs from all folders and
 subfolders. It displays the folder path before each job name to distinguish
-jobs with the same name. The job list is fetched as soon as the Jenkins
-credentials are saved. The small refresh button beside the dropdown reloads
-it later. Once loaded, it is stored in the browser and remains available when
-the page is reopened without
-making another request. Switching tabs or logging in does not refresh the
-list. Changing the Jenkins credentials reloads the list automatically.
+jobs with the same name. The job list is fetched from Jenkins only when the small
+refresh button beside the dropdown is pressed, including the first fetch. Once
+loaded, it is stored in the browser and used locally when reopening the page,
+logging in, or switching tabs. Saving or changing Jenkins credentials also keeps
+the saved list without fetching it; a note reminds you to refresh it manually.
+Without a saved list, the dropdown stays empty until the first refresh. A failed
+refresh preserves the previous list.
+
+On the `Configuration` tab, set separate job list and job status timeouts from
+1 to 600 whole seconds each (default: 60 seconds). These settings survive restarts
+and apply from the next request. Temporary connection failures, HTTP 429, and server errors
+are retried up to twice, with a five-second pause between attempts. Status
+requests only show SOS after retries fail; automatic updates keep the previous
+status visible while retrying. Invalid credentials fail without retrying.
 
 The selected job is stored persistently and queried immediately. Jenkins
 status `blue` lights green, `yellow` lights yellow, and `red` lights red.

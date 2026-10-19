@@ -20,8 +20,6 @@
 #define JENKINS_REQUEST_URL_MAX_LENGTH 512
 #define JENKINS_POLL_CHECK_INTERVAL_MS 60000
 #define JENKINS_POLL_TASK_STACK_SIZE 20480
-#define JENKINS_STARTUP_RETRY_COUNT 3
-#define JENKINS_STARTUP_RETRY_DELAY_MS 5000
 
 static const char *TAG = "jenkins";
 static volatile bool s_request_in_progress;
@@ -103,21 +101,13 @@ static bool update_traffic_light_from_response(const http_response_t *response)
     return true;
 }
 
-static bool jenkins_client_request_internal(const app_config_t *config, bool show_loading,
-                                            bool *retryable)
+static bool jenkins_client_request_once(const app_config_t *config, bool *retryable)
 {
-    if (retryable != NULL) {
-        *retryable = false;
-    }
-    if (traffic_light_control_mode() != APP_CONTROL_MODE_AUTO) {
-        return true;
-    }
+    *retryable = false;
     if (config == NULL || config->jenkins_url[0] == '\0' ||
         config->jenkins_user[0] == '\0' || config->jenkins_token[0] == '\0' ||
         config->jenkins_job_path[0] == '\0') {
         ESP_LOGE(TAG, "Jenkins-Konfiguration ist unvollständig");
-        traffic_light_set(TRAFFIC_LIGHT_RED);
-        traffic_light_start_error_sos_animation();
         return false;
     }
 
@@ -126,8 +116,6 @@ static bool jenkins_client_request_internal(const app_config_t *config, bool sho
                           config->jenkins_url, config->jenkins_job_path);
     if (length < 0 || length >= sizeof(request_url)) {
         ESP_LOGE(TAG, "Jenkins-URL ist zu lang");
-        traffic_light_set(TRAFFIC_LIGHT_RED);
-        traffic_light_start_error_sos_animation();
         return false;
     }
 
@@ -140,21 +128,15 @@ static bool jenkins_client_request_internal(const app_config_t *config, bool sho
         .event_handler = http_event_handler,
         .user_data = &response,
         .crt_bundle_attach = esp_crt_bundle_attach,
-        .timeout_ms = 5000,
+        .timeout_ms = app_jenkins_timeout_ms(config->jenkins_status_timeout_seconds),
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&http_config);
     if (client == NULL) {
         ESP_LOGE(TAG, "HTTP-Client konnte nicht initialisiert werden");
-        traffic_light_set(TRAFFIC_LIGHT_RED);
-        traffic_light_start_error_sos_animation();
         return false;
     }
 
-    if (show_loading) {
-        s_request_in_progress = true;
-        traffic_light_start_query_animation();
-    }
     bool boosted = app_cpu_boost_begin();
     esp_err_t err = esp_http_client_perform(client);
 
@@ -162,37 +144,61 @@ static bool jenkins_client_request_internal(const app_config_t *config, bool sho
     bool status_updated = false;
     if (err == ESP_OK && status_code >= 200 && status_code < 300) {
         status_updated = update_traffic_light_from_response(&response);
-        if (!status_updated) {
-            traffic_light_set(TRAFFIC_LIGHT_RED);
-            traffic_light_start_error_sos_animation();
-        }
     } else {
         ESP_LOGE(TAG, "Jenkins-Anfrage fehlgeschlagen: %s (HTTP %d)",
                  esp_err_to_name(err), status_code);
-        traffic_light_set(TRAFFIC_LIGHT_RED);
-        traffic_light_start_error_sos_animation();
     }
-    if (!status_updated && retryable != NULL) {
+    if (!status_updated) {
         *retryable = (err != ESP_OK && err != ESP_ERR_NO_MEM) ||
                      status_code == 429 || status_code >= 500 ||
                      (err == ESP_OK && status_code >= 200 && status_code < 300);
     }
     esp_http_client_cleanup(client);
     app_cpu_boost_end(boosted);
+    return status_updated;
+}
+
+static void jenkins_client_request_internal(const app_config_t *config, bool show_loading)
+{
+    if (traffic_light_control_mode() != APP_CONTROL_MODE_AUTO) {
+        return;
+    }
+    if (show_loading) {
+        s_request_in_progress = true;
+        traffic_light_start_query_animation();
+    }
+
+    bool status_updated = false;
+    for (unsigned attempt = 0; attempt < JENKINS_REQUEST_MAX_ATTEMPTS; ++attempt) {
+        if (traffic_light_control_mode() != APP_CONTROL_MODE_AUTO) {
+            break;
+        }
+        bool retryable = false;
+        status_updated = jenkins_client_request_once(config, &retryable);
+        if (status_updated || !retryable || attempt + 1 == JENKINS_REQUEST_MAX_ATTEMPTS) {
+            break;
+        }
+        ESP_LOGW(TAG, "Jenkins-Status wird erneut abgefragt (Versuch %u/%u)",
+                 attempt + 2, JENKINS_REQUEST_MAX_ATTEMPTS);
+        vTaskDelay(pdMS_TO_TICKS(JENKINS_REQUEST_RETRY_DELAY_MS));
+    }
+    if (!status_updated && traffic_light_control_mode() == APP_CONTROL_MODE_AUTO) {
+        traffic_light_set(TRAFFIC_LIGHT_RED);
+        traffic_light_start_error_sos_animation();
+    }
     if (show_loading) {
         s_request_in_progress = false;
     }
-    return status_updated;
 }
 
 void jenkins_client_request(const app_config_t *config)
 {
-    jenkins_client_request_internal(config, true, NULL);
+    jenkins_client_request_internal(config, true);
 }
 
 static void jenkins_client_request_without_loading(const app_config_t *config)
 {
-    jenkins_client_request_internal(config, false, NULL);
+    jenkins_client_request_internal(config, false);
 }
 
 bool jenkins_client_request_in_progress(void)
@@ -223,22 +229,7 @@ static void jenkins_poll_task(void *argument)
     app_config_t initial_config = {0};
     if (app_config_load(&initial_config) && initial_config.jenkins_url[0] != '\0' &&
         initial_config.jenkins_job_path[0] != '\0') {
-        for (unsigned attempt = 0; attempt < JENKINS_STARTUP_RETRY_COUNT; ++attempt) {
-            bool retryable = false;
-            if (jenkins_client_request_internal(&initial_config, true, &retryable) ||
-                !retryable) {
-                break;
-            }
-            if (attempt + 1 == JENKINS_STARTUP_RETRY_COUNT) {
-                break;
-            }
-            vTaskDelay(pdMS_TO_TICKS(JENKINS_STARTUP_RETRY_DELAY_MS));
-            if (traffic_light_control_mode() != APP_CONTROL_MODE_AUTO ||
-                !app_config_load(&initial_config) || initial_config.jenkins_url[0] == '\0' ||
-                initial_config.jenkins_job_path[0] == '\0') {
-                break;
-            }
-        }
+        jenkins_client_request(&initial_config);
     }
 
     int64_t last_poll_time_us = esp_timer_get_time();

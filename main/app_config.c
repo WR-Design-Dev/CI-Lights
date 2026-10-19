@@ -49,7 +49,6 @@
 #define JENKINS_JOB_LIST_MAX_LENGTH 16384
 #define JENKINS_JOB_LIST_URL_MAX_LENGTH 512
 #define JENKINS_JOB_PAGE_SIZE 20
-#define JENKINS_JOB_RETRY_DELAY_MS 1000
 #define STATUS_HTTP_TASK_STACK_SIZE 20480
 #define CAPTIVE_DNS_PORT 53
 #define CAPTIVE_DNS_PACKET_MAX_LENGTH 512
@@ -1188,7 +1187,7 @@ static cJSON *fetch_jenkins_job_level_once(const char *parent_url, size_t first_
         .event_handler = jenkins_response_handler,
         .user_data = &response,
         .crt_bundle_attach = esp_crt_bundle_attach,
-        .timeout_ms = 5000,
+        .timeout_ms = app_jenkins_timeout_ms(s_status_config.jenkins_job_list_timeout_seconds),
     };
     esp_http_client_handle_t client = esp_http_client_init(&client_config);
     if (client == NULL) {
@@ -1222,14 +1221,19 @@ static cJSON *fetch_jenkins_job_level_once(const char *parent_url, size_t first_
 
 static cJSON *fetch_jenkins_job_level(const char *parent_url, size_t first_job)
 {
-    bool retryable = false;
-    cJSON *jenkins_json = fetch_jenkins_job_level_once(parent_url, first_job, &retryable);
-    if (jenkins_json != NULL || !retryable) {
-        return jenkins_json;
-    }
+    for (unsigned attempt = 0; attempt < JENKINS_REQUEST_MAX_ATTEMPTS; ++attempt) {
+        bool retryable = false;
+        cJSON *jenkins_json = fetch_jenkins_job_level_once(parent_url, first_job, &retryable);
+        if (jenkins_json != NULL || !retryable ||
+            attempt + 1 == JENKINS_REQUEST_MAX_ATTEMPTS) {
+            return jenkins_json;
+        }
 
-    vTaskDelay(pdMS_TO_TICKS(JENKINS_JOB_RETRY_DELAY_MS));
-    return fetch_jenkins_job_level_once(parent_url, first_job, &retryable);
+        ESP_LOGW(TAG, "Jobliste wird erneut abgefragt (Versuch %u/%u)",
+                 attempt + 2, JENKINS_REQUEST_MAX_ATTEMPTS);
+        vTaskDelay(pdMS_TO_TICKS(JENKINS_REQUEST_RETRY_DELAY_MS));
+    }
+    return NULL;
 }
 
 static bool jenkins_item_is_folder(const cJSON *job)
@@ -1437,16 +1441,41 @@ static esp_err_t status_jenkins_handler(httpd_req_t *request)
 
 static esp_err_t status_poll_interval_get_handler(httpd_req_t *request)
 {
-    char response[48];
-    int response_length = snprintf(response, sizeof(response), "{\"minutes\":%lu}",
-                                   (unsigned long) s_status_config.jenkins_poll_interval_minutes);
+    char response[160];
+    int response_length = snprintf(response, sizeof(response),
+                                   "{\"minutes\":%lu,\"job_list_timeout_seconds\":%lu,"
+                                   "\"status_timeout_seconds\":%lu}",
+                                   (unsigned long) s_status_config.jenkins_poll_interval_minutes,
+                                   (unsigned long) s_status_config.jenkins_job_list_timeout_seconds,
+                                   (unsigned long) s_status_config.jenkins_status_timeout_seconds);
     if (response_length < 0 || response_length >= sizeof(response)) {
         return send_status_error(request, "500 Internal Server Error",
                                  "Abfrageintervall konnte nicht gelesen werden.");
     }
 
     httpd_resp_set_type(request, "application/json; charset=utf-8");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     return httpd_resp_send(request, response, response_length);
+}
+
+static bool parse_jenkins_timeout(const cJSON *json, const char *name,
+                                  uint32_t fallback, uint32_t *seconds)
+{
+    if (json == NULL) {
+        return false;
+    }
+    const cJSON *value = cJSON_GetObjectItemCaseSensitive(json, name);
+    if (value == NULL) {
+        *seconds = fallback;
+        return true;
+    }
+    double number = cJSON_GetNumberValue(value);
+    if (!cJSON_IsNumber(value) || !(number >= 1 && number <= APP_JENKINS_TIMEOUT_MAX_SECONDS) ||
+        number != (double) (uint32_t) number) {
+        return false;
+    }
+    *seconds = (uint32_t) number;
+    return true;
 }
 
 static esp_err_t status_poll_interval_handler(httpd_req_t *request)
@@ -1478,6 +1507,13 @@ static esp_err_t status_poll_interval_handler(httpd_req_t *request)
     bool valid = cJSON_IsNumber(minutes) && minutes_value >= 1.0 &&
                  minutes_value <= (double) UINT32_MAX &&
                  minutes_value == (double) (uint32_t) minutes_value;
+    uint32_t job_list_timeout_seconds, status_timeout_seconds;
+    bool valid_timeouts = parse_jenkins_timeout(json, "job_list_timeout_seconds",
+                                               s_status_config.jenkins_job_list_timeout_seconds,
+                                               &job_list_timeout_seconds) &&
+                          parse_jenkins_timeout(json, "status_timeout_seconds",
+                                               s_status_config.jenkins_status_timeout_seconds,
+                                               &status_timeout_seconds);
     if (json != NULL) {
         cJSON_Delete(json);
     }
@@ -1485,29 +1521,28 @@ static esp_err_t status_poll_interval_handler(httpd_req_t *request)
         return send_status_error(request, "400 Bad Request",
                                  "Bitte ein ganzzahliges Intervall ab 1 Minute angeben.");
     }
+    if (!valid_timeouts) {
+        return send_status_error(request, "400 Bad Request",
+                                 "Bitte für beide Wartezeiten ganze Sekunden von 1 bis 600 angeben.");
+    }
 
     uint32_t poll_interval_minutes = (uint32_t) minutes_value;
-    esp_err_t err = app_config_save_jenkins_poll_interval(poll_interval_minutes);
+    esp_err_t err = app_config_save_jenkins_poll_settings(poll_interval_minutes,
+                                                         job_list_timeout_seconds,
+                                                         status_timeout_seconds);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Abfrageintervall konnte nicht gespeichert werden: %s",
+        ESP_LOGE(TAG, "Jenkins-Abfrageeinstellungen konnten nicht gespeichert werden: %s",
                  esp_err_to_name(err));
         return send_status_error(request, "500 Internal Server Error",
-                                 "Abfrageintervall konnte nicht gespeichert werden.");
+                                 "Jenkins-Abfrageeinstellungen konnten nicht gespeichert werden.");
     }
 
     s_status_config.jenkins_poll_interval_minutes = poll_interval_minutes;
-    char response[96];
-    int response_length = snprintf(response, sizeof(response),
-                                   "Jenkins wird alle %lu Minute%s abgefragt.",
-                                   (unsigned long) poll_interval_minutes,
-                                   poll_interval_minutes == 1 ? "" : "n");
-    if (response_length < 0 || response_length >= sizeof(response)) {
-        return send_status_error(request, "500 Internal Server Error",
-                                 "Abfrageintervall wurde gespeichert.");
-    }
+    s_status_config.jenkins_job_list_timeout_seconds = job_list_timeout_seconds;
+    s_status_config.jenkins_status_timeout_seconds = status_timeout_seconds;
 
     httpd_resp_set_type(request, "text/plain; charset=utf-8");
-    return httpd_resp_send(request, response, response_length);
+    return httpd_resp_sendstr(request, "Jenkins-Abfrageeinstellungen gespeichert.");
 }
 
 static bool select_jenkins_job(const char *job_url)
@@ -2366,10 +2401,13 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "<form id=\"jenkins-form\"><label>Jenkins-URL<input name=\"jenkins_url\" type=\"url\" placeholder=\"https://jenkins.example.de\" required maxlength=\"127\"></label>"
         "<label>Jenkins-Benutzer<input name=\"jenkins_user\" required maxlength=\"63\"></label>"
         "<label>Jenkins-API-Token<input name=\"jenkins_token\" type=\"password\" required maxlength=\"127\"></label>"
-        "<button type=\"submit\">Jenkins-Zugang speichern</button></form><section class=\"poll-settings\"><h2>Automatische Abfrage</h2>"
+        "<button type=\"submit\">Jenkins-Zugang speichern</button></form><section class=\"poll-settings\"><h2>Jenkins-Abfragen</h2>"
         "<p class=\"hint\">Der Jenkins-Status wird in diesem Abstand aktualisiert. Erlaubt sind ganze Minuten ab 1.</p>"
         "<form id=\"poll-interval-form\"><label>Abfrageintervall in Minuten<input id=\"poll-interval\" name=\"poll_interval_minutes\" type=\"number\" min=\"1\" step=\"1\" inputmode=\"numeric\" required></label>"
-        "<button type=\"submit\">Intervall speichern</button></form></section>"
+        "<p class=\"hint\">Wartezeiten pro Jenkins-Antwort: ganze Sekunden von 1 bis 600. Gilt ab der nächsten Abfrage.</p>"
+        "<label>Wartezeit für die Jobliste in Sekunden<input id=\"job-list-timeout\" name=\"job_list_timeout_seconds\" type=\"number\" min=\"1\" max=\"600\" step=\"1\" value=\"60\" inputmode=\"numeric\" required></label>"
+        "<label>Wartezeit für den Jobstatus in Sekunden<input id=\"status-timeout\" name=\"status_timeout_seconds\" type=\"number\" min=\"1\" max=\"600\" step=\"1\" value=\"60\" inputmode=\"numeric\" required></label>"
+        "<button type=\"submit\">Abfrageeinstellungen speichern</button></form></section>"
         "<section class=\"wifi-settings\"><h2>Gespeicherte WLANs</h2><p class=\"hint\">Beim Start versucht die Ampel die WLANs von oben nach unten und bleibt beim ersten erreichbaren. Mit den Pfeilen änderst du die Reihenfolge; sie gilt ab dem nächsten Neustart. Neue WLANs kommen ans Ende. Bei voller Liste ersetzt ein neues WLAN das letzte Profil. Ist keines erreichbar, startet die WLAN-Einrichtung.</p><p class=\"hint\">Handy-Hotspot und IoT-WLAN: Hotspot nach oben setzen. Zum Verwalten Hotspot einschalten und die Ampel neu starten. Danach Hotspot ausschalten und die Ampel erneut starten, damit sie ins IoT-WLAN wechselt.</p><div id=\"saved-wifi\" class=\"saved-wifi\"></div>"
         "<form id=\"wifi-form\"><label>WLAN-Name<div class=\"wifi-name-field\"><input id=\"wifi-ssid\" name=\"wifi_ssid\" list=\"wifi-networks\" placeholder=\"WLAN auswählen oder eingeben\" required maxlength=\"32\"><button id=\"wifi-refresh\" type=\"button\" aria-label=\"WLANs aktualisieren\" title=\"WLANs aktualisieren\">&#x21bb;</button></div><datalist id=\"wifi-networks\"></datalist></label>"
         WIFI_AUTH_FIELDS_HTML
@@ -2428,11 +2466,11 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "function renderJobs(data,message){if(!data||!Array.isArray(data.jobs)||!data.jobs.every(job=>job&&typeof job.name==='string'&&typeof job.url==='string'))return false;jobCache=data;jobCacheUsername=loginUsername.value.trim();select.replaceChildren(...data.jobs.map(job=>{const option=new Option(job.name,job.url);option.selected=job.url===data.selected_url;return option}));select.disabled=!data.jobs.length;showJob.disabled=!data.jobs.length;setJobListNote(data.jobs.length?message:'Keine Jobs gefunden.');return true}"
         "function cacheJobs(){try{localStorage.setItem(jobCacheKey(),JSON.stringify(jobCache))}catch{}}"
         "function restoreJobs(){if(jobCache&&jobCacheUsername===loginUsername.value.trim()&&renderJobs(jobCache,'Gespeicherte Jobliste.'))return;try{const saved=localStorage.getItem(jobCacheKey());if(saved&&renderJobs(JSON.parse(saved),'Gespeicherte Jobliste.'))return}catch{}clearJobList()}"
-        "function invalidateJobs(){try{localStorage.removeItem(jobCacheKey())}catch{}clearJobList('Jenkins-Zugang geändert. Jobliste aktualisieren.')}"
-        "async function loadJobs(){refreshJobs.disabled=true;setJobLoading(true);showStatus('');try{const r=await fetch('/api/jobs',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());const data=await r.json();if(!renderJobs(data,'Jobliste aktualisiert.'))throw new Error('Ungültige Jobliste.');cacheJobs()}finally{refreshJobs.disabled=false;setJobLoading(false)}}"
+        "async function loadJobs(){if(refreshJobs.disabled)return;refreshJobs.disabled=true;setJobLoading(true);showStatus('');try{const r=await fetch('/api/jobs',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());const data=await r.json();if(!renderJobs(data,'Jobliste aktualisiert.'))throw new Error('Ungültige Jobliste.');cacheJobs()}finally{refreshJobs.disabled=false;setJobLoading(false)}}"
         "refreshJobs.addEventListener('click',()=>loadJobs().catch(error=>showStatus('Fehler: '+error.message,true)));"
-        "async function loadPollInterval(){const r=await fetch('/api/poll-interval');if(!r.ok)throw new Error(await r.text());"
-        "const data=await r.json();pollInterval.value=data.minutes}"
+        "const jobListTimeout=document.querySelector('#job-list-timeout'),statusTimeout=document.querySelector('#status-timeout');"
+        "async function loadPollInterval(){const r=await fetch('/api/poll-interval',{cache:'no-store'});if(!r.ok)throw new Error(await r.text());"
+        "const data=await r.json();pollInterval.value=data.minutes;jobListTimeout.value=data.job_list_timeout_seconds;statusTimeout.value=data.status_timeout_seconds}"
         "function showTab(tab){document.querySelectorAll('.tab').forEach(section=>section.classList.toggle('active',section.id==='tab-'+tab));"
         "document.querySelectorAll('[data-tab]').forEach(tabLink=>tabLink.setAttribute('aria-selected',tabLink.dataset.tab===tab));"
         "if(tab==='manual')loadLightStates().catch(error=>showStatus('Fehler: '+error.message,true));if(tab==='jenkins')loadBranding().catch(error=>showStatus('Fehler: '+error.message,true));if(tab==='jenkins'&&!wifiTabLoaded&&!wifiTabLoading){wifiTabLoading=true;loadSavedWifi().then(()=>wifiTabLoaded=true).catch(error=>showStatus('Fehler: '+error.message,true)).finally(()=>wifiTabLoading=false);loadWifiNetworks().catch(error=>showWifiScanStatus('Fehler: '+error.message))}}"
@@ -2452,11 +2490,12 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "document.querySelector('#jenkins-form').addEventListener('submit',async event=>{event.preventDefault();"
         "const r=await fetch('/api/jenkins',{method:'POST',headers:{'Content-Type':'application/json'},"
         "body:JSON.stringify(Object.fromEntries(new FormData(event.target)))});"
-        "if(await showSaveResult(r)){invalidateJobs();showTab('job');loadJobs().catch(error=>showStatus('Fehler: '+error.message,true))}});"
+        "if(await showSaveResult(r)){restoreJobs();setJobListNote('Jenkins-Zugang geändert. Jobliste aktualisieren.');showTab('job')}});"
         "document.querySelector('#poll-interval-form').addEventListener('submit',async event=>{event.preventDefault();"
         "const minutes=Number(pollInterval.value);if(!Number.isInteger(minutes)||minutes<1){showStatus('Bitte mindestens 1 ganze Minute angeben.',true);return}"
+        "const listTimeout=Number(jobListTimeout.value),jobTimeout=Number(statusTimeout.value);if(![listTimeout,jobTimeout].every(value=>Number.isInteger(value)&&value>=1&&value<=600)){showStatus('Bitte für beide Wartezeiten ganze Sekunden von 1 bis 600 angeben.',true);return}"
         "const r=await fetch('/api/poll-interval',{method:'POST',headers:{'Content-Type':'application/json'},"
-        "body:JSON.stringify({poll_interval_minutes:minutes})});await showSaveResult(r)});"
+        "body:JSON.stringify({poll_interval_minutes:minutes,job_list_timeout_seconds:listTimeout,status_timeout_seconds:jobTimeout})});await showSaveResult(r)});"
         "brandingForms.forEach(form=>form.addEventListener('submit',uploadBranding));const bannerForm=document.querySelector('#banner-form'),bannerFile=document.querySelector('#banner-file');bannerForm.querySelector('.banner-upload').addEventListener('click',()=>bannerFile.click());bannerFile.addEventListener('change',()=>{if(bannerFile.files.length)bannerForm.requestSubmit()});"
         "function closeSiteTitleEditor(){siteTitleInput.hidden=true;siteTitleButton.hidden=false;siteTitleButton.setAttribute('aria-expanded','false')}siteTitleButton.addEventListener('click',()=>{if(siteTitleButton.disabled)return;siteTitleInput.value=siteTitleHeading.textContent;siteTitleButton.hidden=true;siteTitleInput.hidden=false;siteTitleButton.setAttribute('aria-expanded','true');siteTitleInput.focus();siteTitleInput.select()});siteTitleInput.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();siteTitleInput.blur()}else if(event.key==='Escape'){siteTitleInput.value=savedSiteTitle;siteTitleInput.blur()}});siteTitleInput.addEventListener('blur',async()=>{const title=siteTitleInput.value.trim();closeSiteTitleEditor();if(title===savedSiteTitle)return;if(!title){siteTitleInput.value=savedSiteTitle;showStatus('Ungültiger Titel.',true);return}siteTitleHeading.textContent=title;document.title=title;siteTitleButton.disabled=true;try{const r=await fetch('/api/site-title',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title})});if(!r.ok)throw new Error(await r.text());const data=await r.json();savedSiteTitle=data.title;siteTitleHeading.textContent=data.title;siteTitleInput.value=data.title;document.title=data.title;showStatus('');showToast('Titel gespeichert.')}catch(error){siteTitleHeading.textContent=savedSiteTitle;siteTitleInput.value=savedSiteTitle;document.title=savedSiteTitle;showStatus('Fehler: '+error.message,true)}finally{siteTitleButton.disabled=false}});"
         "wifiRefresh.addEventListener('click',()=>loadWifiNetworks().catch(error=>showWifiScanStatus('Fehler: '+error.message)));"

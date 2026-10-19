@@ -178,12 +178,24 @@ Auf dieser Verwaltungsseite werden zuerst Jenkins-URL, Jenkins-Benutzer und
 Jenkins-API-Token eingetragen. Anschließend erscheint ein Dropdown mit den
 Jenkins-Jobs aus allen Ordnern und Unterordnern. Die Auswahl zeigt den
 Ordnerpfad vor dem Jobnamen, damit gleichnamige Jobs erkennbar bleiben.
-Nach dem Speichern der Jenkins-Zugangsdaten wird die Jobliste direkt geladen.
-Danach kann sie über den kleinen Aktualisieren-Knopf neben dem Dropdown erneut
-von Jenkins geladen werden. Die geladene Liste bleibt im Browser gespeichert
-und ist auch nach einem erneuten Öffnen der Seite ohne neue Abfrage verfügbar. Ein
-Reiterwechsel oder eine Anmeldung löst keine erneute Joblisten-Abfrage aus.
-Nach einer Änderung der Jenkins-Zugangsdaten wird die Liste automatisch neu geladen.
+Die Jobliste wird ausschließlich über den kleinen Aktualisieren-Knopf neben dem
+Dropdown von Jenkins geladen, auch beim ersten Mal. Die geladene Liste bleibt im
+Browser gespeichert und wird beim Öffnen der Seite, bei der Anmeldung und beim
+Reiterwechsel lokal verwendet. Auch das Speichern oder Ändern der Jenkins-Zugangsdaten
+lädt die Liste nicht neu und erhält die gespeicherte Liste. Ein Hinweis erinnert dann
+an die manuelle Aktualisierung. Ohne gespeicherte Liste bleibt die Auswahl bis zur
+ersten Aktualisierung leer. Schlägt eine Aktualisierung fehl, bleibt die bisherige
+Liste erhalten.
+
+Im Reiter `Konfiguration` können die Wartezeiten für Jobliste und Jobstatus getrennt
+eingestellt werden: jeweils 1 bis 600 ganze Sekunden, standardmäßig 60 Sekunden.
+Die Werte bleiben nach einem Neustart erhalten und gelten ab der nächsten Abfrage.
+Vorübergehende Verbindungsfehler, HTTP 429 und
+Serverfehler werden bis zu zweimal mit fünf Sekunden Pause erneut versucht.
+Die Statusabfrage zeigt erst nach erfolglosen Wiederholungen SOS; bei automatischen
+Aktualisierungen bleibt bis dahin der letzte Status sichtbar. Ungültige Zugangsdaten
+werden ohne Wiederholung als Fehler behandelt.
+
 Der ausgewählte Job wird dauerhaft gespeichert
 und sofort abgefragt. `blue` leuchtet grün, `yellow` gelb, `red` rot; bei einem
 laufenden Build (`*_anime`) pulsiert oder blinkt die jeweilige Jenkins-Statusfarbe
