@@ -161,6 +161,61 @@ Hardware-Secure-Boot, Flash-Verschlüsselung und Anti-Rollback-eFuses werden hie
 nicht aktiviert. Für diese Software-Signierung gibt es kein eFuse-Limit für
 erneutes USB-Flashen; jeder Schreibvorgang unterliegt der normalen Flash-Lebensdauer.
 
+## Automatische Updates
+
+Unter **Firmware-Updates → Automatische Updates** stehen drei Betriebsarten
+bereit: **Aus** für manuelle Updates, **Nur automatisch prüfen** für einen
+Hinweis auf neue Releases und **Automatisch installieren**. Die Automatik ist
+nach der Erstinstallation ausgeschaltet. Ein vorhandenes Update kann weiterhin
+manuell installiert werden. Beide Firmware-Profile verwenden ihren bisherigen
+signierten Release-Kanal und dieselben Prüfungen wie bei manuellen OTA-Updates.
+
+Das Prüfintervall beträgt wahlweise 1, 6, 12 oder 24 Stunden; Vorgabe sind
+24 Stunden. Die erste regelmäßige Prüfung nach dem Start oder Speichern erfolgt
+nach etwa fünf Minuten. Ein tägliches Installationsfenster kann nach dem
+Speichern bereits vorher beginnen. Fehlgeschlagene Prüfungen werden nach 15 Minuten,
+einer Stunde und anschließend jeweils sechs Stunden erneut versucht. Die
+Zeitplanung läuft auf der Ampel, unabhängig von einem geöffneten Browser.
+
+Für die Installation gibt es **Sobald ein Update verfügbar ist** und
+**Täglich zur Uhrzeit** mit Vorgabe 03:00 Uhr. Automatische Installationen
+warten immer auf eine gültige, per SNTP von `pool.ntp.org` synchronisierte
+Internetzeit. Im IoT-Netz müssen DNS und ausgehendes NTP (UDP-Port 123)
+sowie HTTPS für die Release-Downloads erreichbar sein. Ohne Internetzeit
+bleibt eine automatische Installation aus; manuelle Updates bleiben möglich.
+
+Beim ersten Öffnen wird die IANA-Zeitzone des Browsers vorgeschlagen. Erst
+**Update-Einstellungen speichern** übernimmt sie auf die Ampel. Eine gespeicherte
+Zeitzone wird durch weitere Browserbesuche nicht verändert. Sie lässt sich per
+Liste ändern oder mit **Vom Browser übernehmen** erneut erkennen. Es ist kein
+Standortdienst erforderlich. Sommer-/Winterzeit berechnet die Firmware selbst.
+Die eingebettete IANA-Datenbank 2026f deckt 2020 bis einschließlich 2100 ab;
+Änderungen gesetzlicher Zeitzonenregeln erfordern ein Firmware-Update.
+
+Eine tägliche Installation darf innerhalb von fünf Minuten ab der eingestellten
+Uhrzeit beginnen und höchstens einmal je lokalem Tag automatisch versucht
+werden. Der Versuch wird vor der Netzwerkanfrage gespeichert, sodass auch ein
+Neustart keinen zweiten Versuch am selben Tag auslöst. Bei einem Fehler wird
+am nächsten Tag erneut installiert; reine Update-Prüfungen laufen mit dem
+genannten Wiederholungsintervall weiter. Ein verpasstes Zeitfenster wird am
+nächsten Tag nachgeholt. Ändern von Uhrzeit, Zeitzone oder Zeitplan setzt die
+Tagesmarkierung zurück. Nicht existierende Uhrzeiten beim Sommerzeitwechsel
+verschieben sich um die Zeitlücke nach vorn; bei doppelten Uhrzeiten gilt das
+erste Auftreten. Ein begonnener Download darf über das Zeitfenster hinauslaufen.
+
+Einstellungen und Update-Verlauf liegen im bestehenden NVS-Einstellungsbereich,
+bei Secure verschlüsselt. Ein Werksreset setzt auch die Automatik zurück.
+Scheitert das Laden oder Speichern, wird die Automatik angehalten. Nach einem
+fehlgeschlagenen ersten Start oder Rollback wird die betroffene Version für
+automatische Installationen gesperrt; neuere Versionen bleiben erlaubt. Ein
+manueller erneuter Versuch ist möglich. Die Oberfläche zeigt letzte/nächste
+Prüfung, nächste Installationszeit, Ergebnis, letztes erfolgreiches Update und
+gegebenenfalls die gesperrte Version.
+
+Die lokale GUI-Vorschau lässt sich ohne Hardware mit
+`node tools/preview_ota_ui.mjs` unter `http://127.0.0.1:4177/` öffnen. Sie nutzt
+Beispieldaten und speichert Änderungen nur im Arbeitsspeicher des Vorschauprozesses.
+
 ## Wie bleibt der Schlüssel geheim?
 
 GitHub speichert das Secret verschlüsselt und stellt es nur Jobs bereit, deren
@@ -183,6 +238,7 @@ Nach einem signierten Build im ESP-IDF-Terminal:
 
 ```sh
 node tests/test_ota_ui.js
+node tests/test_ota_automation_ui.js
 node tests/test_web_flasher.mjs
 python -m unittest discover -s tests -p 'test_*.py'
 python tools/package_firmware.py

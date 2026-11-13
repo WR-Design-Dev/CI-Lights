@@ -22,9 +22,12 @@ jobs:
       - name: Test administration update flow
         run: |
           node tests/test_ota_ui.js
+          node tests/test_ota_automation_ui.js
           node tests/test_hostname_ui.js
           node tests/test_jenkins_jobs_ui.js
           python3 tests/test_hostname_policy.py
+          python3 tests/test_ota_policy.py
+          python3 tests/test_ota_storage.py
       - name: Test USB installer and optional erase
         run: |
           node tests/test_web_flasher.mjs

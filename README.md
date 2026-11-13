@@ -31,6 +31,14 @@ leaves the previous firmware active. The new firmware confirms successful local
 startup after ten seconds; a reset before confirmation rolls back to the previous
 firmware. Settings and uploaded branding are preserved during OTA updates.
 
+The same **Firmware updates → Automatic updates** panel can check for updates
+or install them automatically, either immediately or daily at a chosen local
+time. The default is **Off**; check intervals are 1, 6, 12 or 24 hours. The browser
+suggests its time zone on the first visit; choose **Save update settings** to
+apply it. The device handles internet time and daylight saving time even with
+the page closed. Later visits keep the saved time zone.
+[Scheduling, failures and rollback details](docs/firmware-updates.md#automatische-updates).
+
 Under **Wi-Fi → Administration address (.local)**, save a device name such as
 `build-light` and confirm **Save device name and restart**. The device saves the
 name and restarts automatically, then uses `http://build-light.local`. Cancelling

@@ -112,6 +112,7 @@ void app_main(void)
                             traffic_light_set_brightness, traffic_light_brightness);
     jenkins_client_start_polling();
     app_ota_confirm_startup(app_config_web_ready());
+    app_ota_start_automation();
 
     if (config.jenkins_url[0] == '\0') {
         traffic_light_set(TRAFFIC_LIGHT_RED);

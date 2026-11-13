@@ -1,5 +1,8 @@
 #include "app_ota.h"
 #include "app_security.h"
+#include "app_ota_policy.h"
+#include "app_ota_storage.h"
+#include "app_timezones.h"
 
 #include <inttypes.h>
 #include <stdint.h>
@@ -7,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 
 #include "cJSON.h"
 #include "esp_app_desc.h"
@@ -16,9 +20,12 @@
 #include "esp_http_client.h"
 #include "esp_image_format.h"
 #include "esp_log.h"
+#include "esp_netif_sntp.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_system.h"
+#include "esp_timer.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "mbedtls/md.h"
@@ -71,6 +78,77 @@ static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 static ota_status_t s_status = {.phase = "idle", .message = "Noch nicht nach Updates gesucht."};
 static char s_requested_version[OTA_VERSION_LIMIT];
 static bool s_boot_validation_started;
+static app_ota_settings_t s_settings;
+static app_ota_history_t s_history;
+static bool s_storage_ok;
+static bool s_clock_synced;
+static bool s_automation_started;
+static int64_t s_next_check_us;
+static int64_t s_automation_start_us;
+static unsigned s_failures;
+static uint32_t s_settings_revision;
+
+typedef enum { OTA_MANUAL_CHECK, OTA_MANUAL_INSTALL, OTA_AUTO_CHECK, OTA_AUTO_INSTALL } ota_request_t;
+static void set_phase(const char *phase, const char *message);
+
+static bool clock_valid(void)
+{
+    portENTER_CRITICAL(&s_status_lock);
+    bool synced = s_clock_synced;
+    portEXIT_CRITICAL(&s_status_lock);
+    return synced && app_timezone_time_supported((int64_t) time(NULL));
+}
+
+static bool persist_history(void)
+{
+    app_ota_history_t history;
+    portENTER_CRITICAL(&s_status_lock);
+    history = s_history;
+    portEXIT_CRITICAL(&s_status_lock);
+    esp_err_t err = app_ota_storage_save_history(&history);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Update-Verlauf konnte nicht gespeichert werden: %s", esp_err_to_name(err));
+        portENTER_CRITICAL(&s_status_lock);
+        s_storage_ok = false;
+        portEXIT_CRITICAL(&s_status_lock);
+    }
+    return err == ESP_OK;
+}
+
+static void finish_operation(app_ota_result_t result, bool failed)
+{
+    int64_t checked_at = clock_valid() ? (int64_t) time(NULL) : 0;
+    int64_t monotonic = esp_timer_get_time();
+    portENTER_CRITICAL(&s_status_lock);
+    s_history.result = result;
+    s_history.checked_at = checked_at;
+    if (failed) { if (s_failures < 3) ++s_failures; }
+    else s_failures = 0;
+    uint32_t delay = failed ? app_ota_retry_seconds(s_failures) : s_settings.interval_hours * 3600;
+    s_next_check_us = monotonic + (int64_t) delay * 1000000;
+    portEXIT_CRITICAL(&s_status_lock);
+    persist_history();
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.busy = false;
+    portEXIT_CRITICAL(&s_status_lock);
+}
+
+static void finalize_startup_history(void)
+{
+    const char *current = esp_app_get_description()->version;
+    app_ota_history_t history;
+    portENTER_CRITICAL(&s_status_lock);
+    history = s_history;
+    portEXIT_CRITICAL(&s_status_lock);
+    if (!app_ota_history_finish_boot(&history, current, clock_valid() ? (int64_t) time(NULL) : 0)) return;
+    if (history.result == APP_OTA_RESULT_ROLLED_BACK) {
+        set_phase("rollback", "Die neue Firmware wurde zurückgerollt. Diese Version wird automatisch übersprungen.");
+    }
+    portENTER_CRITICAL(&s_status_lock);
+    s_history = history;
+    portEXIT_CRITICAL(&s_status_lock);
+    persist_history();
+}
 
 static void set_phase(const char *phase, const char *message)
 {
@@ -84,45 +162,6 @@ static void set_error(esp_err_t err, const char *message)
 {
     ESP_LOGW(TAG, "%s (%s)", message, esp_err_to_name(err));
     set_phase("error", message);
-}
-
-static bool parse_version(const char *text, uint32_t parts[3])
-{
-    if (text == NULL || *text == '\0' || strlen(text) >= OTA_VERSION_LIMIT) {
-        return false;
-    }
-    for (unsigned i = 0; i < 3; ++i) {
-        if (*text < '0' || *text > '9') {
-            return false;
-        }
-        uint32_t value = 0;
-        while (*text >= '0' && *text <= '9') {
-            unsigned digit = (unsigned) (*text++ - '0');
-            if (value > (UINT32_MAX - digit) / 10) {
-                return false;
-            }
-            value = value * 10 + digit;
-        }
-        parts[i] = value;
-        if (i < 2 && *text++ != '.') {
-            return false;
-        }
-    }
-    return *text == '\0';
-}
-
-static bool version_is_newer(const char *candidate, const char *current)
-{
-    uint32_t next[3], installed[3];
-    if (!parse_version(candidate, next) || !parse_version(current, installed)) {
-        return false;
-    }
-    for (unsigned i = 0; i < 3; ++i) {
-        if (next[i] != installed[i]) {
-            return next[i] > installed[i];
-        }
-    }
-    return false;
 }
 
 static const char *json_string(const cJSON *json, const char *key)
@@ -155,7 +194,7 @@ static esp_err_t parse_manifest(const char *body, ota_manifest_t *manifest)
     char expected_url[OTA_URL_LIMIT];
     esp_err_t err = ESP_ERR_INVALID_RESPONSE;
     if (!cJSON_IsObject(json) || !cJSON_IsNumber(schema) || schema->valuedouble != 1 ||
-        !parse_version(version, version_parts) || project == NULL ||
+        !app_ota_parse_version(version, version_parts) || project == NULL ||
         strcmp(project, app_security_project()) != 0 || chip == NULL || strcmp(chip, "esp32s3") != 0 ||
         (profile != NULL && strcmp(profile, app_security_profile()) != 0) ||
         (CONFIG_APP_SECURITY_SECURE && profile == NULL) ||
@@ -390,7 +429,6 @@ static esp_err_t download_image(const ota_manifest_t *manifest)
     /* esp_ota_end verifies the image and its RSA signature before changing boot selection. */
     err = esp_ota_end(ota);
     ota_open = false;
-    if (err == ESP_OK) err = esp_ota_set_boot_partition(partition);
 done:
     if (ota_open) esp_ota_abort(ota);
     close_stream(stream);
@@ -402,7 +440,27 @@ done:
 
 static void update_task(void *argument)
 {
-    bool install = (uintptr_t) argument != 0;
+    ota_request_t kind = (ota_request_t) (uintptr_t) argument;
+    bool install = kind == OTA_MANUAL_INSTALL || kind == OTA_AUTO_INSTALL;
+    bool automatic_install = kind == OTA_AUTO_INSTALL;
+    app_ota_settings_t settings;
+    app_ota_history_t history;
+    portENTER_CRITICAL(&s_status_lock);
+    settings = s_settings;
+    history = s_history;
+    portEXIT_CRITICAL(&s_status_lock);
+    app_ota_result_t result = APP_OTA_RESULT_CHECK_FAILED;
+    bool failed = true;
+    if (automatic_install && settings.schedule == APP_OTA_SCHEDULE_DAILY) {
+        uint32_t day = app_ota_local_day(settings.timezone, (int64_t) time(NULL));
+        portENTER_CRITICAL(&s_status_lock);
+        s_history.install_day = day;
+        portEXIT_CRITICAL(&s_status_lock);
+        if (day == 0 || !persist_history()) {
+            set_error(ESP_FAIL, "Update-Zeitplanung konnte nicht gespeichert werden.");
+            goto done;
+        }
+    }
     ota_manifest_t manifest = {0};
     esp_err_t err = fetch_manifest(&manifest);
     if (err != ESP_OK) {
@@ -414,33 +472,73 @@ static void update_task(void *argument)
     strcpy(s_status.latest_version, manifest.version);
     s_status.total = manifest.size;
     portEXIT_CRITICAL(&s_status_lock);
-    if (!version_is_newer(manifest.version, esp_app_get_description()->version)) {
+    failed = false;
+    if (!app_ota_version_newer(manifest.version, esp_app_get_description()->version)) {
         set_phase("up_to_date", "Die Firmware ist aktuell.");
+        result = APP_OTA_RESULT_CURRENT;
         goto done;
     }
+    result = APP_OTA_RESULT_AVAILABLE;
     if (!install) { set_phase("available", "Neue Firmware ist verfügbar."); goto done; }
-    if (strcmp(manifest.version, s_requested_version) != 0) {
+    if (automatic_install && !app_ota_auto_version_allowed(manifest.version, history.blocked_version)) {
+        set_phase("available", "Diese Version wird nach einem fehlgeschlagenen Start automatisch übersprungen. Manuelle Installation bleibt möglich.");
+        goto done;
+    }
+    if (automatic_install && (!clock_valid() || settings.mode != APP_OTA_AUTO_INSTALL ||
+        (settings.schedule == APP_OTA_SCHEDULE_DAILY &&
+         !app_ota_install_due(&settings, (int64_t) time(NULL), 0)))) {
+        set_phase("available", "Neue Firmware wartet auf die nächste gültige Installationszeit.");
+        goto done;
+    }
+    if (!automatic_install && strcmp(manifest.version, s_requested_version) != 0) {
+        result = APP_OTA_RESULT_INSTALL_FAILED;
+        failed = true;
         set_error(ESP_ERR_INVALID_STATE, "Das Release hat sich geändert. Bitte erneut nach Updates suchen.");
         goto done;
     }
+    failed = true;
+    result = APP_OTA_RESULT_INSTALL_FAILED;
     set_phase("downloading", "Firmware wird heruntergeladen. Stromversorgung angeschlossen lassen.");
     err = download_image(&manifest);
     if (err != ESP_OK) {
         set_error(err, "Update fehlgeschlagen. Die bisherige Firmware bleibt aktiv.");
         goto done;
     }
+    /* Persist the attempted version before selecting it. The previous firmware
+       can then quarantine a failed/aborted first boot instead of retrying forever. */
+    int64_t checked_at = clock_valid() ? (int64_t) time(NULL) : 0;
+    portENTER_CRITICAL(&s_status_lock);
+    strcpy(s_history.pending_version, manifest.version);
+    s_history.checked_at = checked_at;
+    portEXIT_CRITICAL(&s_status_lock);
+    if (!persist_history()) {
+        portENTER_CRITICAL(&s_status_lock);
+        s_history.pending_version[0] = '\0';
+        portEXIT_CRITICAL(&s_status_lock);
+        set_error(ESP_FAIL, "Update-Verlauf konnte nicht gespeichert werden. Installation wurde angehalten.");
+        goto done;
+    }
+    err = esp_ota_set_boot_partition(esp_ota_get_next_update_partition(NULL));
+    if (err != ESP_OK) {
+        portENTER_CRITICAL(&s_status_lock);
+        s_history.pending_version[0] = '\0';
+        portEXIT_CRITICAL(&s_status_lock);
+        set_error(err, "Update konnte nicht zum Starten ausgewählt werden.");
+        goto done;
+    }
     set_phase("rebooting", "Update geprüft. Die Ampel startet neu.");
     vTaskDelay(pdMS_TO_TICKS(2000));
     esp_restart();
 done:
-    portENTER_CRITICAL(&s_status_lock);
-    s_status.busy = false;
-    portEXIT_CRITICAL(&s_status_lock);
+    finish_operation(result, failed);
     vTaskDelete(NULL);
 }
 
 void app_ota_init(void)
 {
+    esp_err_t load_err = app_ota_storage_load(&s_settings, &s_history);
+    s_storage_ok = load_err == ESP_OK;
+    if (!s_storage_ok) ESP_LOGE(TAG, "Update-Automatik konnte nicht geladen werden: %s", esp_err_to_name(load_err));
     uint32_t physical_size = 0;
     const esp_partition_t *ota0 = esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, NULL);
     const esp_partition_t *ota1 = esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, NULL);
@@ -454,6 +552,8 @@ void app_ota_init(void)
                             state == ESP_OTA_IMG_PENDING_VERIFY;
     if (!s_status.configured) set_phase("disabled", "OTA-Partitionierung fehlt. Einmal vollständig per USB flashen.");
     else if (s_status.boot_pending) set_phase("boot_validation", "Neue Firmware wird beim Start geprüft.");
+    if (s_storage_ok && s_status.configured && s_history.pending_version[0] &&
+        strcmp(s_history.pending_version, esp_app_get_description()->version) != 0) finalize_startup_history();
 }
 
 static void boot_validation_task(void *argument)
@@ -466,6 +566,7 @@ static void boot_validation_task(void *argument)
     } else {
         esp_err_t policy_err = app_security_apply_key_policy();
         if (policy_err != ESP_OK) ESP_LOGE(TAG, "Signierschluesselwechsel fehlgeschlagen: %s", esp_err_to_name(policy_err));
+        finalize_startup_history();
         portENTER_CRITICAL(&s_status_lock);
         s_status.boot_pending = false;
         s_status.phase = "idle";
@@ -483,6 +584,7 @@ void app_ota_confirm_startup(bool web_server_ready)
             s_boot_validation_started = true;
             esp_err_t err = app_security_apply_key_policy();
             if (err != ESP_OK) ESP_LOGE(TAG, "Signierschluesselwechsel fehlgeschlagen: %s", esp_err_to_name(err));
+            finalize_startup_history();
         }
         return;
     }
@@ -494,6 +596,170 @@ void app_ota_confirm_startup(bool web_server_ready)
         return;
     }
     s_boot_validation_started = true;
+}
+
+static esp_err_t begin_operation(ota_request_t kind, const char *version, uint32_t revision)
+{
+    bool install = kind == OTA_MANUAL_INSTALL;
+    bool automatic = kind == OTA_AUTO_CHECK || kind == OTA_AUTO_INSTALL;
+    bool valid_time = clock_valid();
+    portENTER_CRITICAL(&s_status_lock);
+    bool allowed = s_status.configured && !s_status.busy && !s_status.boot_pending &&
+                   (!install || (strcmp(s_status.phase, "available") == 0 && version != NULL &&
+                                 strcmp(s_status.latest_version, version) == 0)) &&
+                   (!automatic || (s_storage_ok && revision == s_settings_revision && s_settings.mode != APP_OTA_AUTO_OFF)) &&
+                   (kind != OTA_AUTO_INSTALL || (valid_time && s_settings.mode == APP_OTA_AUTO_INSTALL));
+    if (allowed) {
+        if (install) strcpy(s_requested_version, version);
+        s_status.busy = true;
+        s_status.phase = "checking";
+        s_status.message = "GitHub-Release wird geprüft.";
+        s_status.bytes = 0;
+    }
+    portEXIT_CRITICAL(&s_status_lock);
+    if (!allowed) return ESP_ERR_INVALID_STATE;
+    if (xTaskCreate(update_task, "ota_update", 12288, (void *) (uintptr_t) kind, 3, NULL) != pdPASS) {
+        set_error(ESP_ERR_NO_MEM, "Nicht genug Speicher für das Update.");
+        finish_operation(APP_OTA_RESULT_CHECK_FAILED, true);
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+static void time_synchronized(struct timeval *tv)
+{
+    portENTER_CRITICAL(&s_status_lock);
+    s_clock_synced = app_timezone_time_supported(tv->tv_sec);
+    portEXIT_CRITICAL(&s_status_lock);
+}
+
+static void automation_task(void *argument)
+{
+    (void) argument;
+    bool ntp_started = false;
+    for (;;) {
+        if (!ntp_started) {
+            esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+            config.wait_for_sync = false;
+            config.sync_cb = time_synchronized;
+            esp_err_t err = esp_netif_sntp_init(&config);
+            ntp_started = err == ESP_OK;
+            if (!ntp_started) ESP_LOGW(TAG, "Internetzeit konnte nicht gestartet werden: %s", esp_err_to_name(err));
+        }
+        app_ota_settings_t settings;
+        app_ota_history_t history;
+        ota_status_t status;
+        int64_t check_due, start;
+        bool storage_ok;
+        uint32_t revision;
+        portENTER_CRITICAL(&s_status_lock);
+        settings = s_settings;
+        history = s_history;
+        status = s_status;
+        check_due = s_next_check_us;
+        start = s_automation_start_us;
+        storage_ok = s_storage_ok;
+        revision = s_settings_revision;
+        portEXIT_CRITICAL(&s_status_lock);
+        int64_t now_us = esp_timer_get_time();
+        wifi_ap_record_t access_point;
+        bool connected = esp_wifi_sta_get_ap_info(&access_point) == ESP_OK;
+        if (connected && storage_ok && status.configured && !status.busy && !status.boot_pending &&
+            settings.mode != APP_OTA_AUTO_OFF && now_us - start >= (int64_t) APP_OTA_STARTUP_DELAY_SECONDS * 1000000) {
+            bool install = false;
+            if (settings.mode == APP_OTA_AUTO_INSTALL && clock_valid()) {
+                if (settings.schedule == APP_OTA_SCHEDULE_DAILY) {
+                    install = app_ota_install_due(&settings, (int64_t) time(NULL), history.install_day);
+                } else {
+                    install = now_us >= check_due || (strcmp(status.phase, "available") == 0 &&
+                              app_ota_auto_version_allowed(status.latest_version, history.blocked_version));
+                }
+            }
+            if (install) begin_operation(OTA_AUTO_INSTALL, NULL, revision);
+            else if (now_us >= check_due) begin_operation(OTA_AUTO_CHECK, NULL, revision);
+        }
+        vTaskDelay(pdMS_TO_TICKS(15000));
+    }
+}
+
+void app_ota_start_automation(void)
+{
+    if (s_automation_started || !s_status.configured) return;
+    int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&s_status_lock);
+    s_automation_start_us = now;
+    s_next_check_us = now + (int64_t) APP_OTA_STARTUP_DELAY_SECONDS * 1000000;
+    s_automation_started = true;
+    portEXIT_CRITICAL(&s_status_lock);
+    if (xTaskCreate(automation_task, "ota_automatic", 4096, NULL, 2, NULL) != pdPASS) {
+        portENTER_CRITICAL(&s_status_lock);
+        s_automation_started = false;
+        portEXIT_CRITICAL(&s_status_lock);
+        ESP_LOGE(TAG, "Update-Automatik konnte nicht gestartet werden");
+    }
+}
+
+static cJSON *automation_status_json(void)
+{
+    app_ota_settings_t settings;
+    app_ota_history_t history;
+    int64_t due;
+    bool storage_ok, started;
+    char latest[OTA_VERSION_LIMIT];
+    portENTER_CRITICAL(&s_status_lock);
+    settings = s_settings;
+    history = s_history;
+    due = s_next_check_us;
+    storage_ok = s_storage_ok;
+    started = s_automation_started;
+    strcpy(latest, s_status.latest_version);
+    portEXIT_CRITICAL(&s_status_lock);
+    bool synced = clock_valid();
+    int64_t now = synced ? (int64_t) time(NULL) : 0;
+    int64_t remaining = due - esp_timer_get_time();
+    if (remaining < 0) remaining = 0;
+    char install_time[6];
+    unsigned minute = settings.install_minute % 1440;
+    snprintf(install_time, sizeof(install_time), "%02u:%02u", minute / 60, minute % 60);
+    static const char *const modes[] = {"off", "check", "install"};
+    static const char *const results[] = {"never", "current", "available", "check_failed", "install_failed", "installed", "rolled_back"};
+    int64_t next_install = synced ? app_ota_next_install(&settings, now, history.install_day) : 0;
+    char local_time[24] = {0}, checked_local[24] = {0}, install_local[24] = {0}, installed_local[24] = {0};
+    const char *zone = settings.timezone[0] ? settings.timezone : "Etc/UTC";
+    struct tm local;
+    if (now && app_timezone_localtime(zone, now, &local)) strftime(local_time, sizeof(local_time), "%Y-%m-%dT%H:%M:%S", &local);
+    if (history.checked_at && app_timezone_localtime(zone, history.checked_at, &local)) strftime(checked_local, sizeof(checked_local), "%Y-%m-%dT%H:%M:%S", &local);
+    if (next_install && app_timezone_localtime(zone, next_install, &local)) strftime(install_local, sizeof(install_local), "%Y-%m-%dT%H:%M:%S", &local);
+    if (history.installed_at && app_timezone_localtime(zone, history.installed_at, &local)) strftime(installed_local, sizeof(installed_local), "%Y-%m-%dT%H:%M:%S", &local);
+    cJSON *json = cJSON_CreateObject();
+    if (json == NULL ||
+        cJSON_AddStringToObject(json, "mode", modes[settings.mode]) == NULL ||
+        cJSON_AddNumberToObject(json, "interval_hours", settings.interval_hours) == NULL ||
+        cJSON_AddStringToObject(json, "schedule", settings.schedule == APP_OTA_SCHEDULE_DAILY ? "daily" : "immediate") == NULL ||
+        cJSON_AddStringToObject(json, "install_time", install_time) == NULL ||
+        cJSON_AddStringToObject(json, "time_zone", settings.timezone) == NULL ||
+        cJSON_AddBoolToObject(json, "timezone_auto", settings.timezone_auto) == NULL ||
+        cJSON_AddBoolToObject(json, "clock_synced", synced) == NULL ||
+        cJSON_AddBoolToObject(json, "storage_ok", storage_ok) == NULL ||
+        cJSON_AddBoolToObject(json, "running", started) == NULL ||
+        cJSON_AddNumberToObject(json, "device_time", now) == NULL ||
+        cJSON_AddStringToObject(json, "local_time", local_time) == NULL ||
+        cJSON_AddStringToObject(json, "last_check_local", checked_local) == NULL ||
+        cJSON_AddStringToObject(json, "next_install_local", install_local) == NULL ||
+        cJSON_AddStringToObject(json, "last_install_local", installed_local) == NULL ||
+        cJSON_AddNumberToObject(json, "last_check_at", history.checked_at) == NULL ||
+        cJSON_AddNumberToObject(json, "next_check_in_seconds", started && settings.mode != APP_OTA_AUTO_OFF ? (remaining + 999999) / 1000000 : 0) == NULL ||
+        cJSON_AddNumberToObject(json, "next_install_at", next_install) == NULL ||
+        cJSON_AddStringToObject(json, "last_result", results[history.result]) == NULL ||
+        cJSON_AddStringToObject(json, "last_installed_version", history.installed_version) == NULL ||
+        cJSON_AddNumberToObject(json, "last_install_at", history.installed_at) == NULL ||
+        cJSON_AddStringToObject(json, "blocked_version", history.blocked_version) == NULL ||
+        cJSON_AddBoolToObject(json, "version_blocked", latest[0] && history.blocked_version[0] &&
+                              !app_ota_auto_version_allowed(latest, history.blocked_version)) == NULL) {
+        cJSON_Delete(json);
+        return NULL;
+    }
+    return json;
 }
 
 esp_err_t app_ota_status_handler(httpd_req_t *request)
@@ -516,6 +782,12 @@ esp_err_t app_ota_status_handler(httpd_req_t *request)
         cJSON_AddBoolToObject(json, "configured", status.configured) == NULL) {
         cJSON_Delete(json);
         return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "Nicht genug Speicher.");
+    }
+    cJSON *automation = automation_status_json();
+    if (automation == NULL || !cJSON_AddItemToObject(json, "automation", automation)) {
+        cJSON_Delete(automation);
+        cJSON_Delete(json);
+        return ESP_ERR_NO_MEM;
     }
     cJSON *security = app_security_status_json();
     if (security == NULL || !cJSON_AddItemToObject(json, "security", security)) {
@@ -550,32 +822,17 @@ static esp_err_t start_update(httpd_req_t *request, bool install)
     cJSON *json = memchr(body, '\0', received) == NULL ? cJSON_ParseWithOpts(body, NULL, true) : NULL;
     const char *version = json_string(json, "version");
     uint32_t parts[3];
-    if (!cJSON_IsObject(json) || (install && !parse_version(version, parts))) {
+    if (!cJSON_IsObject(json) || (install && !app_ota_parse_version(version, parts))) {
         cJSON_Delete(json);
         return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Ungültige Firmware-Version.");
     }
-    portENTER_CRITICAL(&s_status_lock);
-    bool allowed = s_status.configured && !s_status.busy && !s_status.boot_pending &&
-                   (!install || (strcmp(s_status.phase, "available") == 0 &&
-                                 strcmp(s_status.latest_version, version) == 0));
-    if (allowed) {
-        if (install) strcpy(s_requested_version, version);
-        s_status.busy = true;
-        s_status.phase = "checking";
-        s_status.message = "GitHub-Release wird geprüft.";
-        s_status.bytes = 0;
-    }
-    portEXIT_CRITICAL(&s_status_lock);
+    esp_err_t err = begin_operation(install ? OTA_MANUAL_INSTALL : OTA_MANUAL_CHECK, version, 0);
     cJSON_Delete(json);
-    if (!allowed) {
+    if (err == ESP_ERR_INVALID_STATE) {
         httpd_resp_set_status(request, "409 Conflict");
         return httpd_resp_sendstr(request, "Update beschäftigt, noch nicht geprüft oder nicht eingerichtet.");
     }
-    if (xTaskCreate(update_task, "ota_update", 12288, (void *) (uintptr_t) install, 3, NULL) != pdPASS) {
-        set_error(ESP_ERR_NO_MEM, "Nicht genug Speicher für das Update.");
-        portENTER_CRITICAL(&s_status_lock);
-        s_status.busy = false;
-        portEXIT_CRITICAL(&s_status_lock);
+    if (err != ESP_OK) {
         return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "Nicht genug Speicher.");
     }
     httpd_resp_set_status(request, "202 Accepted");
@@ -584,6 +841,105 @@ static esp_err_t start_update(httpd_req_t *request, bool install)
 
 esp_err_t app_ota_check_handler(httpd_req_t *request) { return start_update(request, false); }
 esp_err_t app_ota_install_handler(httpd_req_t *request) { return start_update(request, true); }
+
+esp_err_t app_ota_timezones_handler(httpd_req_t *request)
+{
+    cJSON *json = cJSON_CreateObject();
+    cJSON *zones = json == NULL ? NULL : cJSON_AddArrayToObject(json, "zones");
+    if (zones == NULL) { cJSON_Delete(json); return ESP_ERR_NO_MEM; }
+    for (size_t index = 0; index < app_timezone_count(); ++index) {
+        cJSON *name = cJSON_CreateString(app_timezone_name(index));
+        if (name == NULL || !cJSON_AddItemToArray(zones, name)) {
+            cJSON_Delete(name);
+            cJSON_Delete(json);
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    char *body = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+    if (body == NULL) return ESP_ERR_NO_MEM;
+    httpd_resp_set_type(request, "application/json; charset=utf-8");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    esp_err_t err = httpd_resp_sendstr(request, body);
+    free(body);
+    return err;
+}
+
+esp_err_t app_ota_settings_handler(httpd_req_t *request)
+{
+    char content_type[48], body[512] = {0};
+    if (httpd_req_get_hdr_value_str(request, "Content-Type", content_type, sizeof(content_type)) != ESP_OK ||
+        strcmp(content_type, "application/json") != 0 || request->content_len <= 0 ||
+        request->content_len >= sizeof(body)) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "JSON-Anfrage erforderlich.");
+    }
+    int received = 0;
+    while (received < request->content_len) {
+        int count = httpd_req_recv(request, body + received, request->content_len - received);
+        if (count <= 0) return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Anfrage unvollständig.");
+        received += count;
+    }
+    cJSON *json = memchr(body, '\0', received) == NULL ? cJSON_ParseWithOpts(body, NULL, true) : NULL;
+    const char *mode = json_string(json, "mode");
+    const char *schedule = json_string(json, "schedule");
+    const char *install_time = json_string(json, "install_time");
+    const char *zone = json_string(json, "time_zone");
+    const cJSON *interval = cJSON_GetObjectItemCaseSensitive(json, "interval_hours");
+    const cJSON *automatic_zone = cJSON_GetObjectItemCaseSensitive(json, "timezone_auto");
+    app_ota_settings_t settings;
+    app_ota_settings_defaults(&settings);
+    bool valid = cJSON_IsObject(json) && mode != NULL && schedule != NULL && zone != NULL &&
+                 strlen(zone) < sizeof(settings.timezone) && cJSON_IsNumber(interval) &&
+                 (interval->valuedouble == 1 || interval->valuedouble == 6 ||
+                  interval->valuedouble == 12 || interval->valuedouble == 24) &&
+                 cJSON_IsBool(automatic_zone) && install_time != NULL && strlen(install_time) == 5 &&
+                 install_time[0] >= '0' && install_time[0] <= '2' &&
+                 install_time[1] >= '0' && install_time[1] <= '9' && install_time[2] == ':' &&
+                 install_time[3] >= '0' && install_time[3] <= '5' &&
+                 install_time[4] >= '0' && install_time[4] <= '9';
+    if (valid) {
+        settings.mode = strcmp(mode, "off") == 0 ? APP_OTA_AUTO_OFF :
+                        strcmp(mode, "check") == 0 ? APP_OTA_AUTO_CHECK :
+                        strcmp(mode, "install") == 0 ? APP_OTA_AUTO_INSTALL : UINT8_MAX;
+        settings.schedule = strcmp(schedule, "daily") == 0 ? APP_OTA_SCHEDULE_DAILY :
+                            strcmp(schedule, "immediate") == 0 ? APP_OTA_SCHEDULE_IMMEDIATE : UINT8_MAX;
+        settings.interval_hours = (uint8_t) interval->valuedouble;
+        settings.install_minute = ((install_time[0] - '0') * 10 + install_time[1] - '0') * 60 +
+                                  (install_time[3] - '0') * 10 + install_time[4] - '0';
+        settings.timezone_auto = cJSON_IsTrue(automatic_zone);
+        strcpy(settings.timezone, zone);
+        valid = app_ota_settings_valid(&settings);
+    }
+    cJSON_Delete(json);
+    if (!valid) return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Ungültige Update-Einstellungen. Uhrzeit und Zeitzone prüfen.");
+    app_ota_history_t history;
+    portENTER_CRITICAL(&s_status_lock);
+    bool allowed = !s_status.busy && !s_status.boot_pending;
+    if (allowed) s_status.busy = true;
+    history = s_history;
+    if (s_settings.install_minute != settings.install_minute || s_settings.schedule != settings.schedule ||
+        strcmp(s_settings.timezone, settings.timezone) != 0) history.install_day = 0;
+    portEXIT_CRITICAL(&s_status_lock);
+    if (!allowed) {
+        httpd_resp_set_status(request, "409 Conflict");
+        return httpd_resp_sendstr(request, "Ein Update läuft oder wird beim Start geprüft. Bitte danach speichern.");
+    }
+    esp_err_t err = app_ota_storage_save_settings(&settings, &history);
+    int64_t next_check = esp_timer_get_time() + (int64_t) APP_OTA_STARTUP_DELAY_SECONDS * 1000000;
+    portENTER_CRITICAL(&s_status_lock);
+    s_storage_ok = err == ESP_OK;
+    if (err == ESP_OK) {
+        s_settings = settings;
+        s_history = history;
+        ++s_settings_revision;
+        s_next_check_us = next_check;
+        s_failures = 0;
+    }
+    s_status.busy = false;
+    portEXIT_CRITICAL(&s_status_lock);
+    if (err != ESP_OK) return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "Update-Einstellungen konnten nicht gespeichert werden.");
+    return app_ota_status_handler(request);
+}
 
 extern const unsigned char ota_js_start[] asm("_binary_ota_js_start");
 extern const unsigned char ota_js_end[] asm("_binary_ota_js_end");

@@ -33,6 +33,15 @@ Die neue Firmware bestätigt einen erfolgreichen lokalen Start nach zehn Sekunde
 ein Neustart vor dieser Bestätigung führt zur vorherigen Firmware zurück.
 Einrichtung und gespeicherte Daten bleiben bei OTA-Updates erhalten.
 
+Im selben Panel **Firmware-Updates → Automatische Updates** kannst du die
+Automatik einschalten: nur nach Updates suchen oder automatisch installieren,
+wahlweise sofort oder täglich zu einer Uhrzeit. Standard ist **Aus**; das
+Prüfintervall ist auf 1, 6, 12 oder 24 Stunden einstellbar. Die Zeitzone wird beim
+ersten Öffnen aus dem Browser vorgeschlagen und mit **Update-Einstellungen
+speichern** übernommen. Sommer-/Winterzeit und Internetzeit berücksichtigt die
+Ampel selbst, auch bei geschlossener Webseite. Eine bereits gespeicherte Zeitzone
+bleibt erhalten. [Zeitplanung, Fehlerbehandlung und Rollback](docs/firmware-updates.md#automatische-updates).
+
 Unter **WLAN → Verwaltungsadresse (.local)** kannst du einen Gerätenamen wie
 `build-ampel` eingeben und **Gerätenamen speichern und neu starten** bestätigen.
 Die Ampel speichert den Namen und startet automatisch neu; danach gilt
