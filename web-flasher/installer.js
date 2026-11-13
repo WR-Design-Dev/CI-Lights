@@ -144,11 +144,17 @@ async function flash() {
       message('installing', {percent});
     }, () => message('erasingData'), selectedProfile);
     progress.value = 100;
-    let resetFailed = false;
-    try { await loader.after('hard_reset'); }
-    catch { resetFailed = true; }
-    await closePort();
-    message(secure ? resetFailed ? 'secureTransferredManualReset' : 'secureTransferred' : resetFailed ? 'installedManualReset' : 'installed');
+    if (secure) {
+      // Leave activation to the explicit power cycle described in the completion message.
+      await closePort();
+      message('secureTransferred');
+    } else {
+      let resetFailed = false;
+      try { await loader.after('hard_reset'); }
+      catch { resetFailed = true; }
+      await closePort();
+      message(resetFailed ? 'installedManualReset' : 'installed');
+    }
   } catch (error) {
     await closePort();
     message('installFailed', {error}, true);

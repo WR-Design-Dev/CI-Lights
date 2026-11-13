@@ -45,17 +45,45 @@
     return length >= 12 && length <= 128 && !/[\x00-\x1f\x7f]/.test(value);
   }
   async function request(action, body) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 180000);
-    try {
-      const response = await fetch('/api/config/' + action, {method: 'POST',
-        headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body), signal: controller.signal});
-      if (!response.ok) throw new Error(await response.text());
-      return response;
-    } catch (error) {
-      if (controller.signal.aborted) throw new Error('Die Konfigurationsanfrage hat zu lange gedauert.');
-      throw error;
-    } finally { clearTimeout(timer); }
+    const deadline = Date.now() + 180000;
+    async function exchange(route, options, timeout) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeout);
+      try {
+        const response = await fetch(route, {...options, signal: controller.signal});
+        if (!response.ok) throw new Error(await response.text());
+        // Keep the timeout active until the complete response has arrived.
+        return {status: response.status, data: await response.json()};
+      } catch (error) {
+        if (error instanceof SyntaxError) throw new Error('Ungültiger Konfigurationsauftrag.');
+        if (controller.signal.aborted || error instanceof TypeError) {
+          const lost = new Error('Verbindung zur Ampel unterbrochen. WLAN-Verbindung prüfen und erneut versuchen.');
+          lost.connectionLost = true; throw lost;
+        }
+        throw error;
+      } finally { clearTimeout(timer); }
+    }
+    const started = await exchange('/api/config/' + action, {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)}, 180000);
+    if (started.status !== 202) return started.data;
+    if (!/^[a-f0-9]{64}$/.test(started.data?.operation_id)) throw new Error('Ungültiger Konfigurationsauftrag.');
+    const route = '/api/config/transfer?operation_id=' + started.data.operation_id;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      let response;
+      try { response = await exchange(route, {method: 'GET', cache: 'no-store'}, Math.min(10000, remaining)); }
+      catch (error) { if (error.connectionLost) continue; throw error; }
+      const state = response.data;
+      if (state?.done === true) {
+        if (state.error) throw new Error(state.error);
+        if (!state.result || typeof state.result !== 'object') throw new Error('Ungültiger Konfigurationsauftrag.');
+        return state.result;
+      }
+      if (state?.pending !== true) throw new Error('Ungültiger Konfigurationsauftrag.');
+    }
+    throw new Error('Die Konfigurationsanfrage hat zu lange gedauert.');
   }
   function renderSummary() {
     if (!summaryData) return;
@@ -88,15 +116,14 @@
       progress('Sicherung wird entschlüsselt und geprüft.');
       try {
         const backup = JSON.parse(await chosen.text());
-        const response = await request('validate', {password: password.value, backup});
-        summaryData = await response.json();
+        summaryData = await request('validate', {password: password.value, backup});
         if (!/^[a-f0-9]{64}$/.test(summaryData.import_id) ||
             !Number.isInteger(summaryData.expires_in_seconds) || summaryData.expires_in_seconds < 1 || summaryData.expires_in_seconds > 600)
           throw new Error('Die geprüfte Konfiguration ist abgelaufen oder nicht mehr verfügbar. Datei erneut prüfen oder direkt übernehmen.');
         validated = {id: summaryData.import_id, password: password.value, file: chosen};
         expiryTimer = setTimeout(expireReview, summaryData.expires_in_seconds * 1000);
         renderSummary(); review.hidden = false;
-        message('import', 'Sicherung geprüft. Für 10 Minuten ohne erneute Entschlüsselung übernehmbar. Zum Übernehmen die Ersetzung bestätigen.');
+        message('import', 'Sicherung geprüft. Für bis zu 10 Minuten ohne erneute Entschlüsselung übernehmbar. Zum Übernehmen die Ersetzung bestätigen.');
       } catch (error) { invalidate(); message('import', error instanceof SyntaxError ? 'Die Datei enthält kein gültiges JSON.' : error.message, true); }
       finally { stopProgress(); busy = false; controls(); }
     });
@@ -131,8 +158,8 @@
     busy = true; controls(); message('export', 'Verschlüsselte Sicherung wird erstellt. Das kann etwas dauern.');
     progress('Verschlüsselte Sicherung wird erstellt.');
     try {
-      const response = await request('export', {password: value, password_confirm: value});
-      const blob = await response.blob(), url = URL.createObjectURL(blob), link = document.createElement('a');
+      const backup = await request('export', {password: value, password_confirm: value});
+      const blob = new Blob([JSON.stringify(backup)], {type: 'application/json'}), url = URL.createObjectURL(blob), link = document.createElement('a');
       link.href = url; link.download = 'CI-Lights-Konfiguration.json';
       document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
       find('export-password').value = find('export-confirm').value = '';

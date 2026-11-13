@@ -3,6 +3,7 @@
 
 #include "app_config.h"
 #include "app_backup.h"
+#include "app_backup_transfer.h"
 #include "app_backup_ui.h"
 #include "app_hostname.h"
 #include "app_cpu.h"
@@ -129,9 +130,12 @@ static esp_err_t protected_handler(httpd_req_t *request)
         }
         httpd_resp_set_hdr(request, "Cache-Control", "no-store");
         err = httpd_resp_sendstr(request, "Verwaltungspasswort erforderlich.");
-    } else if (s_restart_pending && request->method != HTTP_GET) {
+    } else if ((s_restart_pending || app_backup_transfer_restart_pending()) && request->method != HTTP_GET) {
         httpd_resp_set_status(request, "409 Conflict");
         err = httpd_resp_sendstr(request, "Neustart wird bereits vorbereitet.");
+    } else if (app_backup_transfer_running() && request->method != HTTP_GET) {
+        httpd_resp_set_status(request, "409 Conflict");
+        err = httpd_resp_sendstr(request, "Konfigurationsübertragung läuft. Bitte warten.");
     } else {
         const httpd_uri_t *original = request->user_ctx;
         err = original->handler(request);
@@ -691,17 +695,9 @@ static esp_err_t provision_config_handler(httpd_req_t *request)
     return ESP_OK;
 }
 
-static void restart_after_import(void *argument)
-{
-    (void) argument;
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    vTaskDelay(pdMS_TO_TICKS(2000));
-    esp_restart();
-}
-
 static esp_err_t config_transfer_handler(httpd_req_t *request)
 {
-    if (s_restart_pending) return send_provision_error(request, "409 Conflict", "Neustart wird bereits vorbereitet.");
+    if (s_restart_pending || app_backup_transfer_restart_pending()) return send_provision_error(request, "409 Conflict", "Neustart wird bereits vorbereitet.");
     char type[48];
     if (request->content_len < 1 || request->content_len > APP_BACKUP_MAX_FILE_BYTES + 1024 ||
         httpd_req_get_hdr_value_str(request, "Content-Type", type, sizeof(type)) != ESP_OK || strcmp(type, "application/json"))
@@ -735,47 +731,45 @@ static esp_err_t config_transfer_handler(httpd_req_t *request)
         app_backup_json_delete(json);
         return send_provision_error(request, "400 Bad Request", "Sicherungsdatei, Passwort oder Import-Bestätigung ungültig.");
     }
-    if (!app_ota_begin_config_transfer()) {
-        app_backup_json_delete(json);
-        return send_provision_error(request, "409 Conflict", "Ein Firmware-Update läuft. Konfiguration bitte danach übertragen.");
-    }
-    TaskHandle_t restart = NULL;
-    esp_err_t err = ESP_OK;
-    cJSON *result = NULL;
-    if (importing && xTaskCreate(restart_after_import, "config_restart", 4096, NULL, 3, &restart) != pdPASS) err = ESP_ERR_NO_MEM;
-    if (err == ESP_OK) {
-        if (exporting) err = app_backup_export(password->valuestring, &result);
-        else if (importing) err = prepared ? app_backup_import_prepared(import_id->valuestring) : app_backup_import(password->valuestring, backup);
-        else err = app_backup_validate(password->valuestring, backup, &result);
-    }
-    app_backup_json_delete(json);
-    if (err != ESP_OK || !importing) app_ota_end_config_transfer();
+    char operation_id[65];
+    app_backup_transfer_kind_t kind = exporting ? APP_BACKUP_TRANSFER_EXPORT : !importing ? APP_BACKUP_TRANSFER_VALIDATE :
+        prepared ? APP_BACKUP_TRANSFER_PREPARED : APP_BACKUP_TRANSFER_IMPORT;
+    esp_err_t err = app_backup_transfer_start(kind, json, operation_id);
     if (err != ESP_OK) {
-        if (restart) vTaskDelete(restart);
-        cJSON_Delete(result);
-        if (prepared && err == ESP_ERR_NOT_FOUND) return send_provision_error(request, "409 Conflict",
-            "Die geprüfte Konfiguration ist abgelaufen oder nicht mehr verfügbar. Datei erneut prüfen oder direkt übernehmen.");
-        bool invalid = err == ESP_ERR_INVALID_ARG || err == ESP_ERR_INVALID_SIZE || err == ESP_ERR_INVALID_CRC;
-        return send_provision_error(request, invalid ? "400 Bad Request" : "500 Internal Server Error",
-            err == ESP_ERR_INVALID_CRC ? "Sicherungspasswort falsch oder Datei beschädigt." : invalid ?
-            "Konfigurationsdatei ungültig oder nicht mit dieser Firmware kompatibel." :
+        app_backup_json_delete(json);
+        return send_provision_error(request, err == ESP_ERR_INVALID_STATE ? "409 Conflict" : "500 Internal Server Error",
+            err == ESP_ERR_INVALID_STATE ? "Ein Firmware-Update oder eine Konfigurationsübertragung läuft bereits." :
             "Konfiguration konnte nicht übertragen werden. Speicher und Verbindung prüfen.");
     }
+    char response[96];
+    snprintf(response, sizeof(response), "{\"operation_id\":\"%s\"}", operation_id);
+    httpd_resp_set_status(request, "202 Accepted");
     httpd_resp_set_type(request, "application/json; charset=utf-8");
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
-    if (importing) {
-        s_restart_pending = true;
-        esp_err_t sent = httpd_resp_sendstr(request, "{\"restarting\":true}");
-        xTaskNotifyGive(restart);
-        return sent;
-    }
-    if (exporting) httpd_resp_set_hdr(request, "Content-Disposition", "attachment; filename=\"CI-Lights-Konfiguration.json\"");
-    char *response = cJSON_PrintUnformatted(result);
-    cJSON_Delete(result);
-    if (!response) return send_provision_error(request, "500 Internal Server Error", "Nicht genug Speicher.");
-    esp_err_t sent = httpd_resp_sendstr(request, response);
-    free(response);
+    return httpd_resp_sendstr(request, response);
+}
+
+static esp_err_t config_transfer_status_handler(httpd_req_t *request)
+{
+    char query[96], operation_id[65];
+    if (httpd_req_get_url_query_str(request, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "operation_id", operation_id, sizeof(operation_id)) != ESP_OK)
+        return send_provision_error(request, "400 Bad Request", "Ungültiger Konfigurationsauftrag.");
+    cJSON *result = NULL;
+    esp_err_t err = app_backup_transfer_poll(operation_id, &result);
+    if (err != ESP_OK) return send_provision_error(request, err == ESP_ERR_NOT_FOUND ? "404 Not Found" : "500 Internal Server Error",
+        err == ESP_ERR_NOT_FOUND ? "Konfigurationsauftrag nicht mehr verfügbar. Verbindung und Ampel prüfen." : "Nicht genug Speicher.");
+    bool done = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "done"));
+    char *body = cJSON_PrintUnformatted(result);
+    app_backup_json_delete(result);
+    if (!body) return send_provision_error(request, "500 Internal Server Error", "Nicht genug Speicher.");
+    httpd_resp_set_type(request, "application/json; charset=utf-8");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
+    esp_err_t sent = httpd_resp_sendstr(request, body);
+    free(body);
+    if (sent == ESP_OK && done) app_backup_transfer_acknowledge(operation_id);
     return sent;
 }
 
@@ -1211,6 +1205,7 @@ static const httpd_uri_t backup_script_uri = {.uri = "/backup.js", .method = HTT
 static const httpd_uri_t config_export_uri = {.uri = "/api/config/export", .method = HTTP_POST, .handler = config_transfer_handler};
 static const httpd_uri_t config_validate_uri = {.uri = "/api/config/validate", .method = HTTP_POST, .handler = config_transfer_handler};
 static const httpd_uri_t config_import_uri = {.uri = "/api/config/import", .method = HTTP_POST, .handler = config_transfer_handler};
+static const httpd_uri_t config_transfer_status_uri = {.uri = "/api/config/transfer", .method = HTTP_GET, .handler = config_transfer_status_handler};
 
 static const httpd_uri_t provision_wifi_networks_uri = {
     .uri = "/api/wifi-networks",
@@ -2922,7 +2917,7 @@ void app_start_status_server(const app_config_t *config,
     }
 
     httpd_config_t server_config = HTTPD_DEFAULT_CONFIG();
-    server_config.max_uri_handlers = 51;
+    server_config.max_uri_handlers = 52;
     server_config.stack_size = STATUS_HTTP_TASK_STACK_SIZE;
     server_config.lru_purge_enable = true;
     err = httpd_start(&s_status_server, &server_config);
@@ -2935,6 +2930,7 @@ void app_start_status_server(const app_config_t *config,
         (err = register_protected_uri(s_status_server, &config_export_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &config_validate_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &config_import_uri)) != ESP_OK ||
+        (err = register_protected_uri(s_status_server, &config_transfer_status_uri)) != ESP_OK ||
         (err = httpd_register_uri_handler(s_status_server, &status_page_uri)) != ESP_OK ||
         (err = httpd_register_uri_handler(s_status_server, &status_login_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_device_info_uri)) != ESP_OK ||
@@ -3071,12 +3067,14 @@ void app_start_provisioning(void)
     configure_captive_portal_dhcp(ap_netif);
 
     httpd_config_t server_config = HTTPD_DEFAULT_CONFIG();
-    server_config.max_uri_handlers = 16;
+    server_config.max_uri_handlers = 17;
     server_config.stack_size = 10240;
+    server_config.lru_purge_enable = true;
     ESP_ERROR_CHECK(httpd_start(&s_provision_server, &server_config));
     ESP_ERROR_CHECK(httpd_register_uri_handler(s_provision_server, &backup_script_uri));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &config_validate_uri));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &config_import_uri));
+    ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &config_transfer_status_uri));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &provision_page_uri));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &security_status_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(s_provision_server, &security_script_uri));

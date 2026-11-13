@@ -23,6 +23,13 @@ verbinden, dann die Datei auswählen, das Sicherungspasswort eingeben und
 eine geschätzte Dauer von ca. 60 Sekunden; die tatsächliche Dauer hängt von der
 Ampel ab. Die
 Zusammenfassung zeigt Gerätenamen, WLANs, Jenkins-Job und Verwaltungsbenutzer.
+Die Berechnung läuft als Hintergrundauftrag. Der Browser erhält sofort eine
+Auftragskennung und fragt den Stand mit kurzen HTTP-Anfragen ab. Dadurch bleibt
+der Webserver auch für die Verbindungsprüfung des Einrichtungs-WLANs erreichbar.
+Vorübergehend fehlgeschlagene Statusabfragen werden bis zum Gesamtlimit von drei
+Minuten wiederholt; die Entschlüsselung wird dabei nicht erneut gestartet.
+Abgeschlossene Ergebnisse können fünf Minuten lang erneut abgerufen werden.
+
 Die geprüfte Konfiguration bleibt zehn Minuten im RAM der Ampel. Nach der
 Bestätigung **Aktuelle Einstellungen ersetzen …** übernimmt **Konfiguration
 übernehmen und neu starten** dieses Ergebnis ohne erneute Entschlüsselung.
@@ -33,6 +40,9 @@ Alternativ die Ersetzung bestätigen und **Direkt übernehmen und neu starten**
 wählen. Dieser Weg entschlüsselt und prüft die Datei einmal und speichert sie
 anschließend ohne Vorschau. Der Spinner zeigt auch hier ca. 60 Sekunden an.
 Bei beiden Wegen wird erst nach ausdrücklicher Bestätigung etwas gespeichert.
+Nach erfolgreichem Import startet die Ampel etwa zwei Sekunden nach der
+Bestätigung des Ergebnisses neu. Verschwindet der Browser vorher, erfolgt der
+Neustart spätestens etwa 30 Sekunden nach dem Speichern.
 Ein falsches Passwort oder eine ungültige Datei verändert die Konfiguration
 nicht. Bestehende WLAN-Profile und ein vorhandenes Branding werden vollständig
 durch die Sicherung ersetzt, auch wenn dort kein Banner/Favicon hinterlegt ist.

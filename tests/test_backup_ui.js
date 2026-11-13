@@ -13,8 +13,8 @@ const info = {title: '<img src=x onerror=bad()>', hostname: 'build-ampel', admin
   networks: ['IoT', 'Hotspot'], jenkins_url: 'https://jenkins.example', job_path: '/job/build/',
   import_id: 'a'.repeat(64), expires_in_seconds: 600};
 function setup(initial = false) {
-  const elements = new Map(), calls = [], replies = [], downloads = [], timers = new Map();
-  let nextTimer = 0;
+  const elements = new Map(), calls = [], replies = [], downloads = [], timers = new Map(), blobs = [];
+  let nextTimer = 0, now = 0;
   for (const [, id] of html.matchAll(/id="([^"]+)"/g)) elements.set('#' + id,
     {value: '', checked: false, disabled: false, hidden: false, dataset: {}, files: [], textContent: '',
       listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; },
@@ -24,18 +24,25 @@ function setup(initial = false) {
   if (initial) elements.delete('#config-export-form');
   const context = {document: {querySelector: id => elements.get(id), body: {append() {}},
     createElement() { return {click() { downloads.push({href: this.href, filename: this.download}); }, remove() {}}; }},
-    uiI18n: {t: text => text, response: text => text, onChange() {}}, TextEncoder, AbortController,
-    URL: {createObjectURL: () => 'blob:encrypted', revokeObjectURL() {}},
+    uiI18n: {t: text => text, response: text => text, onChange() {}}, TextEncoder, AbortController, Blob, TypeError,
+    Date: {now: () => now},
+    URL: {createObjectURL(blob) { blobs.push(blob); return 'blob:encrypted'; }, revokeObjectURL() {}},
     setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, {fn, delay}); return id; }, clearTimeout(id) { timers.delete(id); },
     async fetch(route, options) {
       calls.push({route, options});
       const reply = replies.length ? await replies.shift() : null;
       if (reply instanceof Error) throw reply;
       if (reply?.error) return {ok: false, text: async () => reply.error};
-      return {ok: true, json: async () => info, blob: async () => ({type: 'application/json', data: sealed})};
+      return {ok: true, status: reply?.status || 200,
+        json: async () => reply?.data || (route.endsWith('/export') ? sealed : info)};
     }};
   vm.runInNewContext(script, context);
-  return {el, calls, replies, downloads, timers,
+  return {el, calls, replies, downloads, timers, blobs, advance(ms) { now += ms; },
+    async poll() {
+      const timer = [...timers.entries()].find(([, value]) => value.delay === 1000);
+      assert.ok(timer, 'The next status poll must be scheduled');
+      timers.delete(timer[0]); timer[1].fn(); await flush();
+    },
     async fire(id, event = 'submit') { await el(id).listeners[event]({preventDefault() {}}); await flush(); },
     select(text = JSON.stringify(sealed), size = text.length) { el('import-file').files = [{size, text: async () => text}]; },
   };
@@ -152,6 +159,62 @@ function setup(initial = false) {
   invalid.select(); invalid.replies.push({error: 'Sicherungspasswort falsch oder Datei beschädigt.'});
   await invalid.fire('import-direct', 'click');
   assert.equal(invalid.el('import-message').dataset.error, 'true'); assert.ok(!invalid.el('busy').open);
+
+  const operationId = 'b'.repeat(64);
+  for (const initialSetup of [false, true]) {
+    const background = setup(initialSetup);
+    background.select(); background.el('import-password').value = 'backup-password-123';
+    background.replies.push({status: 202, data: {operation_id: operationId}},
+      {data: {pending: true}}, new TypeError('Failed to fetch'), {data: {done: true, result: info}});
+    const checking = background.fire('import-form'); await flush();
+    assert.equal(background.calls.length, 1, 'Only the initial POST sends the backup');
+    await background.poll();
+    assert.equal(background.el('busy').open, true, 'The spinner stays visible while the background job runs');
+    await background.poll();
+    assert.equal(background.el('busy').open, true, 'A transient polling connection error does not abort the operation');
+    await background.poll(); await checking;
+    assert.equal(background.el('import-review').hidden, false);
+    assert.equal(background.calls.filter(call => call.options.method === 'POST').length, 1, 'Reconnect never starts a second decryption');
+    for (const call of background.calls.slice(1)) {
+      assert.equal(call.route, '/api/config/transfer?operation_id=' + operationId);
+      assert.equal(call.options.method, 'GET'); assert.equal(call.options.body, undefined);
+    }
+    background.el('import-confirm').checked = true;
+    background.replies.push({status: 202, data: {operation_id: operationId}}, {data: {done: true, result: {restarting: true}}});
+    const applying = background.fire('import-apply', 'click'); await flush();
+    assert.deepEqual(JSON.parse(background.calls.at(-1).options.body), {confirmed: true, import_id: info.import_id});
+    await background.poll(); await applying;
+    assert.ok(!background.el('busy').open); assert.equal(background.el('import-password').value, '');
+  }
+  const backgroundError = setup(true);
+  backgroundError.select(); backgroundError.el('import-password').value = 'backup-password-123';
+  backgroundError.el('import-confirm').checked = true;
+  backgroundError.replies.push({status: 202, data: {operation_id: operationId}},
+    {data: {done: true, error: 'Sicherungspasswort falsch oder Datei beschädigt.'}});
+  const rejectedImport = backgroundError.fire('import-direct', 'click'); await flush();
+  await backgroundError.poll(); await rejectedImport;
+  assert.ok(!backgroundError.el('busy').open);
+  assert.match(backgroundError.el('import-message').textContent, /Sicherungspasswort falsch/);
+  assert.equal(backgroundError.el('import-password').disabled, false, 'A failed background operation can be retried');
+  const backgroundExport = setup();
+  backgroundExport.el('export-password').value = backgroundExport.el('export-confirm').value = 'backup-password-123';
+  backgroundExport.replies.push({status: 202, data: {operation_id: operationId}}, {data: {done: true, result: sealed}});
+  const downloading = backgroundExport.fire('export-form'); await flush();
+  await backgroundExport.poll(); await downloading;
+  assert.deepEqual(JSON.parse(await backgroundExport.blobs[0].text()), sealed);
+  const timeout = setup(true);
+  timeout.select(); timeout.el('import-password').value = 'backup-password-123';
+  timeout.replies.push({status: 202, data: {operation_id: operationId}});
+  const timedOut = timeout.fire('import-form'); await flush();
+  timeout.advance(180000); await timeout.poll(); await timedOut;
+  assert.match(timeout.el('import-message').textContent, /zu lange gedauert/);
+  assert.ok(!timeout.el('busy').open);
+  const disconnected = setup(true);
+  disconnected.select(); disconnected.el('import-password').value = 'backup-password-123';
+  disconnected.replies.push(new TypeError('Failed to fetch'));
+  await disconnected.fire('import-form');
+  assert.match(disconnected.el('import-message').textContent, /WLAN-Verbindung prüfen/);
+  assert.equal(disconnected.calls.length, 1, 'A failed POST is not repeated automatically');
   for (const [, text] of html.matchAll(/>([^<>]+)</g)) assert.ok(translations.has(text), 'Missing translation: ' + text);
-  console.log('Backup UI passed: modal spinners, prepared/direct setup/admin imports, expiry, confirmation, invalidation and failures');
+  console.log('Backup UI passed: background operations, reconnects, spinners, setup/admin imports, expiry, confirmation and failures');
 })().catch(error => { console.error(error); process.exitCode = 1; });

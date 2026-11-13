@@ -171,19 +171,26 @@ esp_err_t app_backup_open(const char *password, const cJSON *sealed, char **plai
     size_t size;
     if (app_backup_unbase64(cJSON_GetObjectItemCaseSensitive(sealed, "salt"), salt, sizeof(salt), &size) || size != sizeof(salt) ||
         app_backup_unbase64(cJSON_GetObjectItemCaseSensitive(sealed, "nonce"), nonce, sizeof(nonce), &size) || size != sizeof(nonce)) return ESP_ERR_INVALID_ARG;
-    size_t capacity = APP_BACKUP_MAX_PLAIN_BYTES + 16;
-    unsigned char *cipher = malloc(capacity), *output = calloc(1, APP_BACKUP_MAX_PLAIN_BYTES + 1);
+    size_t encoded_size = strlen(data->valuestring);
+    if (encoded_size < 24 || encoded_size % 4 || encoded_size > 4 * ((APP_BACKUP_MAX_PLAIN_BYTES + 18) / 3))
+        return ESP_ERR_INVALID_SIZE;
+    size_t capacity = encoded_size / 4 * 3;
+    if (data->valuestring[encoded_size - 1] == '=') --capacity;
+    if (data->valuestring[encoded_size - 2] == '=') --capacity;
+    if (capacity <= 16 || capacity > APP_BACKUP_MAX_PLAIN_BYTES + 16) return ESP_ERR_INVALID_SIZE;
+    size_t plain_capacity = capacity - 16;
+    unsigned char *cipher = malloc(capacity), *output = calloc(1, plain_capacity + 1);
     if (!cipher || !output) { free(cipher); free(output); return ESP_ERR_NO_MEM; }
     esp_err_t err = app_backup_unbase64(data, cipher, capacity, &size);
-    if (err == ESP_OK && size < 17) err = ESP_ERR_INVALID_SIZE;
+    if (err == ESP_OK && size != capacity) err = ESP_ERR_INVALID_SIZE;
     if (err == ESP_OK) {
         crypto_job_t job = {.password = password, .salt = salt, .nonce = nonce, .input = cipher, .input_size = size,
-            .output = output, .capacity = APP_BACKUP_MAX_PLAIN_BYTES, .decrypt = true};
+            .output = output, .capacity = plain_capacity, .decrypt = true};
         err = run_crypto(&job);
         if (err == ESP_OK && memchr(output, 0, job.output_size)) err = ESP_ERR_INVALID_ARG;
     }
     free(cipher);
     if (err == ESP_OK) *plain = (char *) output;
-    else { mbedtls_platform_zeroize(output, APP_BACKUP_MAX_PLAIN_BYTES + 1); free(output); }
+    else { mbedtls_platform_zeroize(output, plain_capacity + 1); free(output); }
     return err;
 }

@@ -40,7 +40,7 @@ for (const name of ['index.html', 'impressum.html', 'datenschutz.html']) {
   }
 }
 
-function setup({corrupt = false, firmware = true, chip = 'ESP32-S3', sizeId = 0x16, registers = {}, writeFailure = false,
+function setup({corrupt = false, firmware = true, chip = 'ESP32-S3', sizeId = 0x16, registers = {}, writeFailure = false, resetFailure = false,
                 secure = true, consent = true, query = ''} = {}) {
   unsubscribe?.();
   const events = [];
@@ -97,7 +97,7 @@ function setup({corrupt = false, firmware = true, chip = 'ESP32-S3', sizeId = 0x
       if (writeFailure) throw new Error('Flash verification failed');
       options.fileArray.forEach((file, index) => options.reportProgress(index, file.data.length, file.data.length));
     }
-    async after() { events.push('reset'); }
+    async after(mode) { events.push(mode); if (resetFailure) throw new Error('Reset unavailable'); }
   }
   const fetch = async (input) => {
     const url = String(input);
@@ -161,6 +161,13 @@ assert.equal(write.flashFreq, 'keep');
 assert.deepEqual(write.fileArray.map(file => file.address), offsets);
 assert.equal(app.events.includes('erase'), false, 'Default installation erased settings');
 assert.equal(app.elements.get('#flash-progress').value, 100);
+assert.equal(app.events.includes('hard_reset'), true, 'Standard installation still restarts automatically');
+
+app = setup({resetFailure: true});
+await app.click('connect');
+await app.click('flash');
+assert.match(app.elements.get('#installer-status').textContent, /press RESET or reconnect/i,
+  'Standard retains its manual restart instruction when automatic reset fails');
 
 app = setup({corrupt: true});
 await app.click('connect');
@@ -241,6 +248,12 @@ assert.equal(app.events.includes('erase'), true);
 assert.deepEqual(app.events.find(event => event.fileArray).fileArray.map(file => file.address), [0x10000, 0x18000, 0x20000, 0]);
 assert.match(app.elements.get('#installer-status').textContent, /Files transferred/);
 assert.doesNotMatch(app.elements.get('#installer-status').textContent, /successfully secured/i);
+assert.equal(app.events.includes('hard_reset'), false, 'Secure must wait for the explicit power cycle before eFuse activation');
+assert.equal(app.events.includes('disconnect'), true, 'Secure releases the USB port after the verified transfer');
+assert.match(app.elements.get('#installer-status').textContent, /disconnect all power.*reconnect.*next startup.*eFuses/);
+await app.click('language-de');
+assert.match(app.elements.get('#installer-status').textContent, /vollständig vom Strom.*wieder an.*nächsten Start.*eFuses/);
+assert.equal(app.events.includes('hard_reset'), false, 'Switching the completion message language must not restart Secure');
 app = setup({registers: {[0x60007038]: 1 << 20}});
 await app.click('connect');
 assert.equal(app.elements.get('#flash').disabled, true);

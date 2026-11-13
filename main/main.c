@@ -1,4 +1,5 @@
 #include "app_config.h"
+#include "app_backup_transfer.h"
 #include "app_cpu.h"
 #include "app_ota.h"
 #include "app_settings.h"
@@ -39,6 +40,8 @@ void app_main(void)
     }
     app_storage_init();
     app_ota_init();
+    esp_err_t backup_err = app_backup_transfer_init();
+    if (backup_err != ESP_OK) ESP_LOGE(TAG, "Konfigurationsübertragung konnte nicht gestartet werden: %s", esp_err_to_name(backup_err));
     esp_err_t cpu_err = app_cpu_init();
     if (cpu_err != ESP_OK) {
         ESP_LOGW(TAG, "CPU-Leistungssperre konnte nicht eingerichtet werden: %s",

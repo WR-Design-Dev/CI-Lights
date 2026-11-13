@@ -16,10 +16,12 @@ typedef int esp_err_t;
 #define ESP_ERR_NVS_NO_FREE_PAGES 8
 #define ESP_ERR_NVS_NEW_VERSION_FOUND 9
 #define ESP_ERROR_CHECK(x) assert((x) == ESP_OK)
+const char *esp_err_to_name(esp_err_t);
 ''',
 'sdkconfig.h': '#pragma once\n#define CONFIG_APP_SECURITY_SECURE 0\n',
 'esp_http_server.h': '#pragma once\ntypedef struct httpd_req httpd_req_t;\n',
-'esp_log.h': '#pragma once\n#define ESP_LOGW(tag,...) ((void)(tag))\n#define ESP_LOGE(tag,...) ((void)(tag))\n',
+'esp_log.h': '#pragma once\n#define ESP_LOGW(tag,...) ((void)(tag))\n#define ESP_LOGE(tag,...) ((void)(tag))\n#define ESP_LOG_INFO 3\n#define ESP_LOGI(tag,...) do {(void)(tag);if(0) printf(__VA_ARGS__);} while(0)\n#include <stdio.h>\n',
+'esp_system.h': '#pragma once\nvoid esp_restart(void);\n',
 'esp_random.h': '#pragma once\n#include <stddef.h>\nvoid esp_fill_random(void*,size_t);\n',
 'esp_timer.h': r'''
 #pragma once
@@ -70,7 +72,7 @@ esp_err_t esp_partition_erase_range(const esp_partition_t*,size_t,size_t);
 ''',
 'freertos/FreeRTOS.h': '#pragma once\n#define pdPASS 1\n#define portMAX_DELAY -1\n#define tskIDLE_PRIORITY 0\ntypedef int portMUX_TYPE;\n#define portMUX_INITIALIZER_UNLOCKED 0\n#define portENTER_CRITICAL(m) ((void)(m))\n#define portEXIT_CRITICAL(m) ((void)(m))\n',
 'freertos/task.h': '#pragma once\nint xTaskCreate(void(*)(void*),const char*,int,void*,int,void*);\nvoid vTaskDelete(void*);\n',
-'freertos/semphr.h': '#pragma once\ntypedef void *SemaphoreHandle_t;\nSemaphoreHandle_t xSemaphoreCreateBinary(void);\nvoid xSemaphoreGive(SemaphoreHandle_t);\nvoid xSemaphoreTake(SemaphoreHandle_t,int);\nvoid vSemaphoreDelete(SemaphoreHandle_t);\n',
+'freertos/semphr.h': '#pragma once\ntypedef void *SemaphoreHandle_t;\nSemaphoreHandle_t xSemaphoreCreateBinary(void);\nSemaphoreHandle_t xSemaphoreCreateMutex(void);\nvoid xSemaphoreGive(SemaphoreHandle_t);\nvoid xSemaphoreTake(SemaphoreHandle_t,int);\nvoid vSemaphoreDelete(SemaphoreHandle_t);\n',
 'mbedtls/platform_util.h': '#pragma once\n#include <stddef.h>\nvoid mbedtls_platform_zeroize(void*,size_t);\n',
 'mbedtls/md.h': '#pragma once\n#include <stddef.h>\ntypedef int mbedtls_md_info_t;\n#define MBEDTLS_MD_SHA256 1\nconst mbedtls_md_info_t *mbedtls_md_info_from_type(int);\nint mbedtls_md(const mbedtls_md_info_t*,const unsigned char*,size_t,unsigned char*);\n',
 'mbedtls/base64.h': '#pragma once\n#include <stddef.h>\nint mbedtls_base64_encode(unsigned char*,size_t,size_t*,const unsigned char*,size_t);\nint mbedtls_base64_decode(unsigned char*,size_t,size_t*,const unsigned char*,size_t);\n',

@@ -23,10 +23,14 @@ Der Installer liest vor jedem Schreib-/Löschvorgang Sicherheits-eFuses und
 Schlüsselblöcke. Gesicherte, teilweise konfigurierte, inkompatible oder nicht
 vollständig prüfbare Geräte werden abgewiesen. Er programmiert selbst keine
 eFuses: Der bewusst installierte Secure-Bootloader aktiviert die Hardware beim
-ersten Start. Die Website prüft alle Downloads vor dem Löschen, schreibt den
-Bootloader zuletzt und setzt erst nach vollständiger Übertragung zurück.
+ersten Start. Die Website prüft alle Downloads vor dem Löschen und schreibt den
+Bootloader zuletzt. Bei Secure löst sie danach keinen automatischen Reset aus.
 
-Stabile Stromversorgung während Erstinstallation und erstem Start angeschlossen
+Während des Flashens die Stromversorgung angeschlossen lassen. Erst wenn die
+Website die vollständige Übertragung und Prüfung meldet, die Ampel vollständig
+vom Strom trennen (USB und gegebenenfalls externe Versorgung) und wieder
+anschließen. Beim folgenden Start werden die eFuses gesetzt und der dauerhafte
+Schutz aktiviert. Während dieses Starts die Stromversorgung angeschlossen
 lassen. Anschließend in der Ampel-Verwaltung **Sicherheitsstatus** öffnen.
 Der Status befindet sich innerhalb des Panels **Firmware-Updates**.
 `/api/security` liefert den öffentlichen Bericht unter der bestehenden

@@ -38,7 +38,7 @@ class ConfigBackupTests(unittest.TestCase):
         stub = root / 'platform.o'
         subprocess.run([*options, '-w', '-c', str(ROOT / 'tests/backup_host_platform.c'), '-o', str(stub)], check=True)
         sources = ['app_settings', 'app_config_store', 'app_branding', 'app_ota_storage',
-                   'app_ota_policy', 'app_timezones', 'app_hostname_policy', 'app_backup_model', 'app_backup_crypto', 'app_backup']
+                   'app_ota_policy', 'app_timezones', 'app_hostname_policy', 'app_backup_model', 'app_backup_crypto', 'app_backup', 'app_backup_transfer']
         library = root / 'backup.so'
         subprocess.run([*options, '-Wall', '-Wextra', '-Werror', '-shared',
                         *[str(ROOT / 'main' / (name + '.c')) for name in sources],
@@ -52,6 +52,12 @@ class ConfigBackupTests(unittest.TestCase):
                       'test_import_prepared': ([ctypes.c_char_p], ctypes.c_int),
                       'test_derivations': ([], ctypes.c_uint),
                       'test_advance_time': ([ctypes.c_int, ctypes.c_int], None),
+                      'test_transfer_start': ([ctypes.c_int, ctypes.c_char_p], ctypes.c_void_p),
+                      'test_transfer_poll': ([ctypes.c_char_p], ctypes.c_void_p),
+                      'test_transfer_run': ([], None), 'test_transfer_ack': ([ctypes.c_char_p], None),
+                      'test_transfer_running': ([], ctypes.c_int), 'test_transfer_restart_pending': ([], ctypes.c_int),
+                      'test_transfer_reserved': ([], ctypes.c_int), 'test_restarts': ([], ctypes.c_int),
+                      'test_transfer_fail_task': ([ctypes.c_int], None),
                       'test_state': ([], ctypes.c_void_p), 'test_free': ([ctypes.c_void_p], None),
                       'test_writes': ([], ctypes.c_int), 'test_fail_after': ([ctypes.c_int], None),
                       'test_reset': ([], ctypes.c_int), 'test_config_present': ([], ctypes.c_int),
@@ -76,6 +82,14 @@ class ConfigBackupTests(unittest.TestCase):
 
     def state(self):
         return self.read(self.lib.test_state())
+
+    def start_transfer(self, kind, body):
+        pointer = self.lib.test_transfer_start(kind, json.dumps(body).encode())
+        self.assertTrue(pointer)
+        try:
+            return ctypes.string_at(pointer)
+        finally:
+            self.lib.test_free(pointer)
 
     def setUp(self):
         self.lib.test_seed(1)
@@ -120,6 +134,112 @@ class ConfigBackupTests(unittest.TestCase):
         before = self.lib.test_writes()
         self.assertNotEqual(self.lib.test_import_prepared(import_id), 0)
         self.assertEqual(self.lib.test_writes(), before)
+
+    def test_background_validation_and_ram_import_keep_http_requests_short(self):
+        backup = self.backup()
+        self.lib.test_seed(0)
+        before = self.lib.test_writes()
+        operation = self.start_transfer(1, {'password': PASSWORD.decode(), 'backup': backup})
+        self.assertTrue(self.lib.test_transfer_running())
+        self.assertTrue(self.lib.test_transfer_reserved())
+        self.assertEqual(self.lib.test_derivations(), 0, 'Submitting only queues the worker')
+        self.assertEqual(self.read(self.lib.test_transfer_poll(operation)), {'pending': True})
+        self.assertFalse(self.lib.test_transfer_poll(b'0' * 64))
+        self.assertFalse(self.lib.test_transfer_start(1, b'{}'), 'Only one operation runs at a time')
+        self.lib.test_advance_time(60, 1)
+        self.assertEqual(self.lib.test_writes(), before)
+        self.lib.test_transfer_run()
+        checked = self.read(self.lib.test_transfer_poll(operation))
+        self.assertTrue(checked['done'])
+        self.assertEqual(checked['result']['admin_username'], 'source-admin')
+        self.assertEqual(self.lib.test_writes(), before, 'Checking does not save anything')
+        self.assertEqual(self.lib.test_derivations(), 1)
+        self.assertFalse(self.lib.test_transfer_reserved())
+        self.assertEqual(self.read(self.lib.test_transfer_poll(operation)), checked, 'A lost result response can be retried')
+        self.lib.test_advance_time(10, 1)
+        self.assertEqual(self.read(self.lib.test_transfer_poll(operation))['result']['expires_in_seconds'], 590,
+                         'Reconnecting does not extend the lifetime of the decrypted configuration')
+        prepared = self.start_transfer(3, {'import_id': checked['result']['import_id'], 'confirmed': True})
+        self.lib.test_transfer_run()
+        self.assertEqual(self.lib.test_derivations(), 1, 'Applying from RAM never decrypts again')
+        self.assertEqual(self.read(self.lib.test_transfer_poll(prepared)), {'done': True, 'result': {'restarting': True}})
+        self.assertTrue(self.lib.test_transfer_restart_pending())
+        self.assertTrue(self.lib.test_transfer_reserved(), 'Hold OTA until the imported configuration restarts')
+        self.lib.test_transfer_ack(b'0' * 64)
+        self.lib.test_advance_time(1, 1)
+        self.assertEqual(self.lib.test_restarts(), 0)
+        self.lib.test_transfer_ack(prepared)
+        self.lib.test_advance_time(1, 1)
+        self.lib.test_transfer_ack(prepared)
+        self.lib.test_advance_time(1, 1)
+        self.assertEqual(self.lib.test_restarts(), 1, 'Repeated polls cannot postpone a scheduled restart')
+        self.lib.test_boot()
+        self.assertEqual(self.state()['device']['title'], 'Source title')
+
+    def test_background_direct_import_restarts_if_browser_disappears(self):
+        backup = self.backup()
+        self.lib.test_seed(0)
+        operation = self.start_transfer(2, {'password': PASSWORD.decode(), 'backup': backup, 'confirmed': True})
+        self.assertEqual(self.lib.test_derivations(), 0)
+        self.lib.test_transfer_run()
+        self.assertEqual(self.lib.test_derivations(), 1)
+        self.lib.test_advance_time(29, 1)
+        self.assertEqual(self.lib.test_restarts(), 0)
+        self.lib.test_advance_time(1, 1)
+        self.assertEqual(self.lib.test_restarts(), 1)
+        self.lib.test_advance_time(30, 1)
+        self.assertEqual(self.lib.test_restarts(), 1)
+        self.lib.test_boot()
+        self.assertEqual(self.state()['device']['title'], 'Source title')
+
+    def test_background_errors_and_task_failures_release_the_operation(self):
+        backup = self.backup()
+        self.lib.test_transfer_fail_task(1)
+        self.assertFalse(self.lib.test_transfer_start(1, json.dumps({'password': PASSWORD.decode(), 'backup': backup}).encode()))
+        self.assertFalse(self.lib.test_transfer_reserved())
+        self.assertFalse(self.lib.test_transfer_running())
+        self.lib.test_transfer_fail_task(0)
+        operation = self.start_transfer(1, {'password': 'incorrect-password', 'backup': backup})
+        before = self.lib.test_writes()
+        self.lib.test_transfer_run()
+        result = self.read(self.lib.test_transfer_poll(operation))
+        self.assertTrue(result['done'])
+        self.assertIn('Sicherungspasswort falsch', result['error'])
+        self.assertEqual(self.lib.test_writes(), before)
+        self.assertFalse(self.lib.test_transfer_reserved())
+        self.assertFalse(self.lib.test_transfer_restart_pending())
+        next_operation = self.start_transfer(1, {'password': PASSWORD.decode(), 'backup': backup})
+        self.assertFalse(self.lib.test_transfer_poll(operation))
+        self.lib.test_transfer_run()
+        self.assertTrue(self.read(self.lib.test_transfer_poll(next_operation))['done'])
+        self.lib.test_advance_time(300, 1)
+        self.assertFalse(self.lib.test_transfer_poll(next_operation), 'Abandoned results expire')
+
+    def test_background_export_download_is_encrypted_and_can_be_retrieved_again(self):
+        operation = self.start_transfer(0, {'password': PASSWORD.decode()})
+        self.assertEqual(self.lib.test_derivations(), 0)
+        self.lib.test_transfer_run()
+        downloaded = self.read(self.lib.test_transfer_poll(operation))
+        self.assertEqual(downloaded['result']['format'], 'ci-lights-backup')
+        self.assertNotIn('private-test-token', json.dumps(downloaded))
+        self.assertEqual(self.read(self.lib.test_transfer_poll(operation)), downloaded)
+        plain = self.read(self.lib.test_open_file(PASSWORD, json.dumps(downloaded['result']).encode()))
+        self.assertEqual(plain['admin']['username'], 'source-admin')
+
+    def test_background_import_write_failure_does_not_restart(self):
+        backup = self.backup()
+        self.lib.test_seed(0)
+        operation = self.start_transfer(2, {'password': PASSWORD.decode(), 'backup': backup, 'confirmed': True})
+        self.lib.test_fail_after(1)
+        self.lib.test_transfer_run()
+        self.lib.test_fail_after(0)
+        self.assertIn('error', self.read(self.lib.test_transfer_poll(operation)))
+        self.assertFalse(self.lib.test_transfer_restart_pending())
+        self.assertFalse(self.lib.test_transfer_reserved())
+        self.lib.test_advance_time(40, 1)
+        self.assertEqual(self.lib.test_restarts(), 0)
+        self.lib.test_boot()
+        self.assertEqual(self.state()['device']['title'], 'Target title')
 
     def test_prepared_import_expires_even_if_timer_callback_is_delayed(self):
         encoded = json.dumps(self.backup()).encode()

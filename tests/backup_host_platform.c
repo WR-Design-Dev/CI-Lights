@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "app_backup.h"
+#include "app_backup_transfer.h"
 #include "app_config_store.h"
 #include "app_branding.h"
 #include "app_ota_storage.h"
@@ -77,12 +78,23 @@ int esp_partition_write(const esp_partition_t *p,size_t at,const void *data,size
 int esp_partition_erase_range(const esp_partition_t *p,size_t at,size_t size){assert(p==&partition&&at+size<=p->size);if(mutation())return ESP_FAIL;memset(flash+at,255,size);return ESP_OK;}
 static int64_t now_us;
 static unsigned derivations;
-static esp_timer_create_args_t expiry_timer;
+static esp_timer_create_args_t expiry_timers[4];
+static void (*queued_transfer)(void*);
+static void *queued_argument;
+static bool transfer_reserved;
+static int restarts;
+static bool fail_transfer_task;
 int64_t esp_timer_get_time(void){return now_us;}
-int esp_timer_create(const esp_timer_create_args_t *args,esp_timer_handle_t *timer){expiry_timer=*args;*timer=&expiry_timer;return ESP_OK;}
-int esp_timer_start_periodic(esp_timer_handle_t timer,uint64_t period){assert(timer==&expiry_timer&&period==1000000);return ESP_OK;}
-int esp_timer_delete(esp_timer_handle_t timer){assert(timer==&expiry_timer);memset(&expiry_timer,0,sizeof(expiry_timer));return ESP_OK;}
-void test_advance_time(int seconds,int fire_timer){now_us+=(int64_t)seconds*1000000;if(fire_timer&&expiry_timer.callback)expiry_timer.callback(expiry_timer.arg);}
+int esp_timer_create(const esp_timer_create_args_t *args,esp_timer_handle_t *timer){for(unsigned i=0;i<4;++i)if(!expiry_timers[i].callback){expiry_timers[i]=*args;*timer=&expiry_timers[i];return ESP_OK;}return ESP_ERR_NO_MEM;}
+int esp_timer_start_periodic(esp_timer_handle_t timer,uint64_t period){assert(timer&&period==1000000);return ESP_OK;}
+int esp_timer_delete(esp_timer_handle_t timer){memset(timer,0,sizeof(expiry_timers[0]));return ESP_OK;}
+void test_advance_time(int seconds,int fire_timer){now_us+=(int64_t)seconds*1000000;if(fire_timer)for(unsigned i=0;i<4;++i)if(expiry_timers[i].callback)expiry_timers[i].callback(expiry_timers[i].arg);}
+bool app_cpu_boost_begin(void){return true;}
+void app_cpu_boost_end(bool boosted){assert(boosted);}
+bool app_ota_begin_config_transfer(void){if(transfer_reserved)return false;transfer_reserved=true;return true;}
+void app_ota_end_config_transfer(void){transfer_reserved=false;}
+void esp_restart(void){++restarts;}
+const char *esp_err_to_name(int error){(void)error;return "test error";}
 unsigned test_derivations(void){return derivations;}
 void esp_fill_random(void *out,size_t size){assert(RAND_bytes(out,size)==1);}
 void mbedtls_platform_zeroize(void *p,size_t n){volatile unsigned char *b=p;while(n--)*b++=0;}
@@ -95,10 +107,11 @@ int mbedtls_base64_decode(unsigned char *out,size_t cap,size_t *written,const un
     int err=size<0||(size_t)size>cap?-1:0;if(!err){memcpy(out,tmp,size);*written=size;}free(tmp);return err;
 }
 SemaphoreHandle_t xSemaphoreCreateBinary(void){return calloc(1,sizeof(int));}
+SemaphoreHandle_t xSemaphoreCreateMutex(void){int *s=malloc(sizeof(int));*s=1;return s;}
 void xSemaphoreGive(SemaphoreHandle_t s){*(int*)s=1;}
-void xSemaphoreTake(SemaphoreHandle_t s,int ticks){(void)ticks;assert(*(int*)s==1);}
+void xSemaphoreTake(SemaphoreHandle_t s,int ticks){(void)ticks;assert(*(int*)s==1);*(int*)s=0;}
 void vSemaphoreDelete(SemaphoreHandle_t s){free(s);}
-int xTaskCreate(void(*fn)(void*),const char *name,int stack,void *arg,int priority,void *task){(void)name;(void)stack;(void)task;assert(priority==0);fn(arg);return 1;}
+int xTaskCreate(void(*fn)(void*),const char *name,int stack,void *arg,int priority,void *task){(void)task;if(!strcmp(name,"config_transfer")){assert(priority==3&&stack>=20480&&!queued_transfer);if(fail_transfer_task)return 0;queued_transfer=fn;queued_argument=arg;return 1;}assert(priority==0);fn(arg);return 1;}
 void vTaskDelete(void *task){assert(!task);}
 int psa_crypto_init(void){return 0;}
 int psa_key_derivation_setup(psa_key_derivation_operation_t *o,int alg){assert(alg==101);memset(o,0,sizeof(*o));return 0;}
@@ -129,6 +142,7 @@ bool traffic_light_manual_state(app_manual_light_t i){return runtime.enabled[i];
 void traffic_light_manual_color(app_manual_light_t i,uint8_t *r,uint8_t *g,uint8_t *b){*r=runtime.colors[i][0];*g=runtime.colors[i][1];*b=runtime.colors[i][2];}
 
 void test_seed(int variant){
+    assert(!queued_transfer);assert(!app_backup_transfer_init());transfer_reserved=false;restarts=0;fail_transfer_task=false;
     app_backup_discard_prepared();now_us=0;derivations=0;
     fail_after=0;for(unsigned i=0;i<256;++i){free(entries[i].data);memset(&entries[i],0,sizeof(entries[i]));}memset(flash,255,sizeof(flash));app_storage_init();
     assert(app_admin_credentials_save(variant?"source-admin":"target-admin",variant?"source-password":"target-password")==0);
@@ -143,6 +157,15 @@ void test_seed(int variant){
     unsigned char icon[]={0,0,1,0,1,0,7,8};assert(!app_branding_save(APP_BRANDING_FAVICON,APP_BRANDING_ICO,icon,sizeof(icon)));writes=0;
 }
 void test_boot(void){app_backup_discard_prepared();app_storage_init();assert(!app_light_settings_load(&runtime));}
+char *test_transfer_start(int kind,const char *body){cJSON *json=app_backup_json_parse(body);char id[65];int err=app_backup_transfer_start(kind,json,id);if(err){app_backup_json_delete(json);return NULL;}return strdup(id);}
+char *test_transfer_poll(const char *id){cJSON *out=NULL;if(app_backup_transfer_poll(id,&out))return NULL;char *text=cJSON_PrintUnformatted(out);app_backup_json_delete(out);return text;}
+void test_transfer_run(void){assert(queued_transfer);void(*fn)(void*)=queued_transfer;void *arg=queued_argument;queued_transfer=NULL;fn(arg);}
+void test_transfer_ack(const char *id){app_backup_transfer_acknowledge(id);}
+int test_transfer_running(void){return app_backup_transfer_running();}
+int test_transfer_restart_pending(void){return app_backup_transfer_restart_pending();}
+int test_transfer_reserved(void){return transfer_reserved;}
+int test_restarts(void){return restarts;}
+void test_transfer_fail_task(int fail){fail_transfer_task=fail;}
 void test_free(void *p){free(p);}
 char *test_export(const char *password){cJSON *out=NULL;assert(!app_backup_export(password,&out));char *text=cJSON_PrintUnformatted(out);cJSON_Delete(out);return text;}
 int test_import(const char *password,const char *file){cJSON *json=app_backup_json_parse(file);if(!json)return ESP_ERR_INVALID_ARG;int err=app_backup_import(password,json);cJSON_Delete(json);return err;}
