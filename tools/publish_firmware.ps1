@@ -139,6 +139,7 @@ try {
     Invoke-Checked 'powershell.exe' @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'tests/test_publish_script.ps1')
     Invoke-Checked $node @('tests/test_ota_ui.js')
     Invoke-Checked $node @('tests/test_ota_automation_ui.js')
+    Invoke-Checked $node @('tests/test_backup_ui.js')
     Invoke-Checked $node @('tests/test_hostname_ui.js')
     Invoke-Checked $node @('tests/test_web_flasher.mjs')
     Invoke-Checked $node @('tests/test_security_installer.mjs')

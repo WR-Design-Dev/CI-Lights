@@ -24,6 +24,9 @@ function page() {
     WIFI_AUTH_FIELDS_HTML: macro(source, 'WIFI_AUTH_FIELDS_HTML'),
     OTA_AUTOMATION_HTML: macro(read('main/app_ota_ui.h'), 'OTA_AUTOMATION_HTML'),
     OTA_AUTOMATION_STYLE: macro(read('main/app_ota_ui.h'), 'OTA_AUTOMATION_STYLE'),
+    CONFIG_TRANSFER_STYLE: macro(read('main/app_backup_ui.h'), 'CONFIG_TRANSFER_STYLE'),
+    CONFIG_IMPORT_HTML: macro(read('main/app_backup_ui.h'), 'CONFIG_IMPORT_HTML'),
+    CONFIG_EXPORT_HTML: macro(read('main/app_backup_ui.h'), 'CONFIG_EXPORT_HTML'),
   };
   const tokens = body.match(/"(?:[^"\\]|\\.)*"|\b[A-Z][A-Z_]+\b/g) || [];
   let html = tokens.map(token => token.startsWith('"') ? JSON.parse(token) : (macros[token] || '')).join('');
@@ -71,7 +74,7 @@ const fixtures = {
   '/api/wifi': {networks: [], connected_ssid: 'IoT'}, '/api/wifi-networks': {networks: [], details: []},
   '/api/branding': {favicon: {uploaded: false}},
 };
-const assets = new Set(['localization.js', 'ota.js', 'wifi.js', 'hostname.js', 'security.js']);
+const assets = new Set(['localization.js', 'ota.js', 'wifi.js', 'hostname.js', 'security.js', 'backup.js']);
 const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, 'http://127.0.0.1');
@@ -89,6 +92,11 @@ const server = http.createServer(async (request, response) => {
     for await (const chunk of request) { body += chunk; if (body.length > 4096) throw new Error('Preview body too large'); }
     response.setHeader('Content-Type', 'application/json; charset=utf-8');
     if (route === '/api/login') { response.end('{}'); return; }
+    if (route.startsWith('/api/config/')) {
+      response.statusCode = 501;
+      response.end('Konfigurationssicherungen sind nur auf einer Ampel verfügbar. Diese lokale Vorschau zeigt die Oberfläche.');
+      return;
+    }
     if (route === '/api/language') {
       if (request.method === 'POST') language = JSON.parse(body).language;
       response.end(JSON.stringify({language})); return;

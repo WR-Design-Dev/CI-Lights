@@ -1,8 +1,10 @@
 #include "app_branding.h"
+#include "app_config_store.h"
 
 #include <string.h>
 
 #include "esp_partition.h"
+#include "nvs.h"
 
 #define BRANDING_PARTITION_SIZE 0x20000
 #define BRANDING_SLOT_SIZE 0x8000
@@ -83,7 +85,7 @@ static bool read_valid_slot(const esp_partition_t *partition, size_t offset,
     return (crc ^ 0xffffffffu) == header->crc32;
 }
 
-static selected_slot_t select_slot(const esp_partition_t *partition,
+static selected_slot_t select_latest_slot(const esp_partition_t *partition,
                                     app_branding_kind_t kind)
 {
     selected_slot_t selected = {0};
@@ -101,6 +103,56 @@ static selected_slot_t select_slot(const esp_partition_t *partition,
         }
     }
     return selected;
+}
+
+static const char *slot_key(app_branding_kind_t kind)
+{
+    return kind == APP_BRANDING_LOGO ? "brand_logo" : "brand_icon";
+}
+
+static selected_slot_t select_slot(const esp_partition_t *partition, app_branding_kind_t kind)
+{
+    selected_slot_t selected = {0};
+    if (partition == NULL || (kind != APP_BRANDING_LOGO && kind != APP_BRANDING_FAVICON)) return selected;
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(app_settings_namespace(), NVS_READONLY, &handle);
+    if (err == ESP_ERR_NVS_NOT_FOUND) return select_latest_slot(partition, kind);
+    if (err != ESP_OK) return selected;
+    uint8_t slot = 2;
+    err = nvs_get_u8(handle, slot_key(kind), &slot);
+    nvs_close(handle);
+    if (err == ESP_ERR_NVS_NOT_FOUND) return select_latest_slot(partition, kind);
+    if (err != ESP_OK || slot > 1) return selected;
+    selected.offset = ((size_t) kind * 2 + slot) * BRANDING_SLOT_SIZE;
+    selected.found = read_valid_slot(partition, selected.offset, kind, &selected.header);
+    return selected;
+}
+
+esp_err_t app_branding_pin_active(void)
+{
+    const esp_partition_t *partition = branding_partition();
+    if (partition == NULL) return ESP_ERR_NOT_FOUND;
+    selected_slot_t selected[2] = {select_slot(partition, APP_BRANDING_LOGO),
+                                   select_slot(partition, APP_BRANDING_FAVICON)};
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(app_settings_namespace(), NVS_READWRITE, &handle);
+    if (err != ESP_OK) return err;
+    for (unsigned i = 0; i < 2 && err == ESP_OK; ++i) {
+        uint8_t slot = selected[i].found ? selected[i].offset / BRANDING_SLOT_SIZE % 2 : 2;
+        err = nvs_set_u8(handle, slot_key((app_branding_kind_t) i), slot);
+    }
+    if (err == ESP_OK) err = nvs_commit(handle);
+    nvs_close(handle);
+    return err;
+}
+
+void app_branding_active_slots(uint8_t slots[2])
+{
+    const esp_partition_t *partition = branding_partition();
+    for (unsigned i = 0; i < 2; ++i) {
+        selected_slot_t selected = select_slot(partition, (app_branding_kind_t) i);
+        slots[i] = selected.found ? selected.offset / BRANDING_SLOT_SIZE % 2 : 2;
+    }
 }
 
 bool app_branding_get_info(app_branding_kind_t kind, app_branding_info_t *info)
@@ -130,10 +182,10 @@ esp_err_t app_branding_read(app_branding_kind_t kind, void *buffer, size_t lengt
     return esp_partition_read(partition, slot.offset + header_size(&slot.header), buffer, length);
 }
 
-esp_err_t app_branding_save(app_branding_kind_t kind, app_branding_format_t format,
-                            const void *data, size_t length)
+esp_err_t app_branding_stage(app_branding_kind_t kind, app_branding_format_t format,
+                             const void *data, size_t length, uint8_t *slot)
 {
-    if (data == NULL || length == 0 || length > APP_BRANDING_MAX_BYTES ||
+    if (slot == NULL || data == NULL || length == 0 || length > APP_BRANDING_MAX_BYTES ||
         !allowed_format(kind, format)) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -173,5 +225,48 @@ esp_err_t app_branding_save(app_branding_kind_t kind, app_branding_format_t form
         return err;
     }
     branding_header_t check;
-    return read_valid_slot(partition, target, kind, &check) ? ESP_OK : ESP_FAIL;
+    if (!read_valid_slot(partition, target, kind, &check)) return ESP_FAIL;
+    *slot = target / BRANDING_SLOT_SIZE % 2;
+    return ESP_OK;
+}
+
+esp_err_t app_branding_save(app_branding_kind_t kind, app_branding_format_t format,
+                            const void *data, size_t length)
+{
+    esp_err_t err = app_branding_pin_active();
+    uint8_t slot;
+    if (err == ESP_OK) err = app_branding_stage(kind, format, data, length, &slot);
+    if (err != ESP_OK) return err;
+    nvs_handle_t handle;
+    err = nvs_open(app_settings_namespace(), NVS_READWRITE, &handle);
+    if (err != ESP_OK) return err;
+    err = nvs_set_u8(handle, slot_key(kind), slot);
+    if (err == ESP_OK) err = nvs_commit(handle);
+    nvs_close(handle);
+    return err;
+}
+
+bool app_branding_data_valid(app_branding_format_t format,
+                                  const uint8_t *data, size_t length)
+{
+    static const uint8_t png_header[] = {137, 80, 78, 71, 13, 10, 26, 10};
+    if (format == APP_BRANDING_PNG) {
+        return length >= sizeof(png_header) &&
+               memcmp(data, png_header, sizeof(png_header)) == 0;
+    }
+    if (format == APP_BRANDING_ICO) {
+        return length >= 6 && data[0] == 0 && data[1] == 0 &&
+               data[2] == 1 && data[3] == 0 && (data[4] != 0 || data[5] != 0);
+    }
+    if (format == APP_BRANDING_SVG) {
+        size_t prefix = length < 512 ? length : 512;
+        for (size_t i = 0; i + 4 < prefix; ++i) {
+            if (data[i] == '<' && memcmp(data + i, "<svg", 4) == 0 &&
+                (data[i + 4] == ' ' || data[i + 4] == '\n' ||
+                 data[i + 4] == '\r' || data[i + 4] == '\t' || data[i + 4] == '>')) {
+                return true;
+            }
+        }
+    }
+    return false;
 }

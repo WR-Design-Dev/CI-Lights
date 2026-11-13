@@ -31,6 +31,14 @@ leaves the previous firmware active. The new firmware confirms successful local
 startup after ten seconds; a reset before confirmation rolls back to the previous
 firmware. Settings and uploaded branding are preserved during OTA updates.
 
+Under **Configuration → Export configuration**, download a complete device backup.
+A separate backup password encrypts Wi-Fi credentials, the Jenkins token and the
+administration account. **Import configuration** is available both during initial
+setup and in administration: select the file, enter its password, review the
+summary and confirm replacement. After restarting, the device uses the settings
+and administration credentials from the backup.
+[Backup contents and restoration](docs/konfigurationssicherung.md).
+
 The same **Firmware updates → Automatic updates** panel can check for updates
 or install them automatically, either immediately or daily at a chosen local
 time. The default is **Off**; check intervals are 1, 6, 12 or 24 hours. The browser

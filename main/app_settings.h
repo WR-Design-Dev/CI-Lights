@@ -5,6 +5,7 @@
 
 #include "app_config.h"
 #include "app_hostname_policy.h"
+#include "app_ota_policy.h"
 
 #include "esp_err.h"
 
@@ -27,6 +28,34 @@ typedef struct {
     uint8_t count;
     uint8_t last_index;
 } app_wifi_profiles_t;
+
+typedef struct {
+    uint8_t schema, mode, disco_effect;
+    uint8_t colors[3][3];
+    bool enabled[3];
+} app_light_settings_t;
+
+typedef struct {
+    app_config_t config;
+    app_wifi_profiles_t wifi;
+    char admin_username[APP_ADMIN_USERNAME_MAX_LENGTH + 1];
+    uint8_t admin_salt[16], admin_hash[32];
+    char language[3], title[APP_SITE_TITLE_MAX_LENGTH + 1];
+    char hostname[APP_HOSTNAME_MAX_LENGTH + 1];
+    app_light_settings_t lights;
+    app_ota_settings_t ota;
+    /* Local transaction metadata, never exported to another device. */
+    app_ota_history_t ota_history;
+    uint8_t branding_slots[2];
+} app_settings_snapshot_t;
+
+void app_light_settings_defaults(app_light_settings_t *settings);
+bool app_light_settings_valid(const app_light_settings_t *settings);
+esp_err_t app_light_settings_load(app_light_settings_t *settings);
+esp_err_t app_light_settings_save(const app_light_settings_t *settings);
+esp_err_t app_settings_snapshot_load(app_settings_snapshot_t *snapshot);
+bool app_settings_snapshot_valid(const app_settings_snapshot_t *snapshot);
+esp_err_t app_settings_snapshot_stage(const app_settings_snapshot_t *snapshot);
 
 /* Persistente Geräteeinstellungen und gemeinsame Eingabeprüfung. */
 bool app_config_copy_string(char *destination, size_t destination_size,

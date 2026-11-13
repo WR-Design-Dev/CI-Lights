@@ -1,10 +1,11 @@
 #include "app_ota_storage.h"
+#include "app_config_store.h"
 #include "app_timezones.h"
 #include <string.h>
 #include "nvs.h"
 
 /* The existing encrypted settings namespace is also cleared by factory reset. */
-#define OTA_NAMESPACE "settings"
+#define OTA_NAMESPACE app_settings_namespace()
 #define OTA_SETTINGS_KEY "ota_auto"
 #define OTA_HISTORY_KEY "ota_history"
 

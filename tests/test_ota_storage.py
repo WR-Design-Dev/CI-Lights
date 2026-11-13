@@ -35,6 +35,7 @@ HARNESS = r'''
 #include <string.h>
 #include "app_ota_storage.h"
 #include "nvs.h"
+const char *app_settings_namespace(void) { return "settings"; }
 static unsigned char settings_blob[sizeof(app_ota_settings_t)];
 static unsigned char history_blob[sizeof(app_ota_history_t)];
 static size_t settings_size, history_size;

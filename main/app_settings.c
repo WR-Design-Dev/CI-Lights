@@ -1,4 +1,6 @@
 #include "app_settings.h"
+#include "app_config_store.h"
+#include "app_ota_storage.h"
 #include "app_security.h"
 #include "esp_partition.h"
 
@@ -12,7 +14,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 
-#define SETTINGS_NAMESPACE "settings"
+#define SETTINGS_NAMESPACE app_settings_namespace()
 #define NVS_KEY_WIFI_SSID "wifi_ssid"
 #define NVS_KEY_WIFI_USERNAME "wifi_user"
 #define NVS_KEY_WIFI_PASSWORD "wifi_password"
@@ -269,6 +271,7 @@ void app_storage_init(void)
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+    ESP_ERROR_CHECK(app_config_store_init());
     nvs_handle_t nvs_handle;
     if (nvs_open(SETTINGS_NAMESPACE, NVS_READONLY, &nvs_handle) == ESP_OK) {
         size_t salt_length = sizeof(s_admin_salt);
@@ -460,19 +463,7 @@ esp_err_t app_config_save_hostname(const char *hostname)
 
 bool app_config_factory_reset(void)
 {
-    nvs_handle_t nvs_handle;
-    esp_err_t err = nvs_open(SETTINGS_NAMESPACE, NVS_READWRITE, &nvs_handle);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Einstellungen konnten nicht zum Zurücksetzen geöffnet werden: %s",
-                 esp_err_to_name(err));
-        return false;
-    }
-
-    err = nvs_erase_all(nvs_handle);
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs_handle);
-    }
-    nvs_close(nvs_handle);
+    esp_err_t err = app_config_store_factory_reset();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Einstellungen konnten nicht zurückgesetzt werden: %s",
                  esp_err_to_name(err));
@@ -942,5 +933,162 @@ esp_err_t app_config_save_cpu_mode(app_cpu_mode_t mode)
         err = nvs_commit(nvs_handle);
     }
     nvs_close(nvs_handle);
+    return err;
+}
+
+void app_light_settings_defaults(app_light_settings_t *settings)
+{
+    memset(settings, 0, sizeof(*settings));
+    settings->schema = 1;
+    settings->colors[0][0] = 255;
+    settings->colors[1][0] = settings->colors[1][1] = 255;
+    settings->colors[2][1] = 255;
+}
+
+bool app_light_settings_valid(const app_light_settings_t *settings)
+{
+    return settings != NULL && settings->schema == 1 && settings->mode <= APP_CONTROL_MODE_API &&
+           settings->disco_effect < APP_DISCO_EFFECT_COUNT;
+}
+
+esp_err_t app_light_settings_load(app_light_settings_t *settings)
+{
+    app_light_settings_defaults(settings);
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(SETTINGS_NAMESPACE, NVS_READONLY, &handle);
+    if (err == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (err != ESP_OK) return err;
+    app_light_settings_t stored;
+    size_t size = sizeof(stored);
+    err = nvs_get_blob(handle, "lights", &stored, &size);
+    nvs_close(handle);
+    if (err == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (err != ESP_OK) return err;
+    if (size != sizeof(stored) || !app_light_settings_valid(&stored)) return ESP_ERR_INVALID_STATE;
+    *settings = stored;
+    return ESP_OK;
+}
+
+esp_err_t app_light_settings_save(const app_light_settings_t *settings)
+{
+    if (!app_light_settings_valid(settings)) return ESP_ERR_INVALID_ARG;
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(SETTINGS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) return err;
+    err = nvs_set_blob(handle, "lights", settings, sizeof(*settings));
+    if (err == ESP_OK) err = nvs_commit(handle);
+    nvs_close(handle);
+    return err;
+}
+
+esp_err_t app_settings_snapshot_load(app_settings_snapshot_t *snapshot)
+{
+    memset(snapshot, 0, sizeof(*snapshot));
+    if (!s_admin_password_set || !app_config_load(&snapshot->config) ||
+        !app_wifi_profiles_load(&snapshot->wifi)) return ESP_ERR_INVALID_STATE;
+    strcpy(snapshot->admin_username, s_admin_username);
+    memcpy(snapshot->admin_salt, s_admin_salt, sizeof(s_admin_salt));
+    memcpy(snapshot->admin_hash, s_admin_hash, sizeof(s_admin_hash));
+    strcpy(snapshot->language, s_ui_language);
+    strcpy(snapshot->title, s_site_title);
+    strcpy(snapshot->hostname, s_hostname);
+    esp_err_t err = app_light_settings_load(&snapshot->lights);
+    if (err == ESP_OK) err = app_ota_storage_load(&snapshot->ota, &snapshot->ota_history);
+    return err;
+}
+
+static bool terminated(const char *value, size_t size) { return memchr(value, 0, size) != NULL; }
+
+bool app_settings_snapshot_valid(const app_settings_snapshot_t *snapshot)
+{
+    if (snapshot == NULL) return false;
+    const app_config_t *config = &snapshot->config;
+    if (!terminated(snapshot->admin_username, sizeof(snapshot->admin_username)) ||
+        !admin_username_valid(snapshot->admin_username) ||
+        !terminated(snapshot->language, sizeof(snapshot->language)) ||
+        (strcmp(snapshot->language, "de") && strcmp(snapshot->language, "en")) ||
+        !terminated(snapshot->title, sizeof(snapshot->title)) || !snapshot->title[0] ||
+        !terminated(snapshot->hostname, sizeof(snapshot->hostname)) ||
+        snapshot->wifi.count == 0 || snapshot->wifi.count > APP_WIFI_PROFILE_MAX_COUNT ||
+        snapshot->wifi.last_index >= snapshot->wifi.count ||
+        !config->jenkins_poll_interval_minutes || !app_jenkins_timeout_is_valid(config->jenkins_job_list_timeout_seconds) ||
+        !app_jenkins_timeout_is_valid(config->jenkins_status_timeout_seconds) ||
+        config->light_brightness_percent < 1 || config->light_brightness_percent > 100 ||
+        (unsigned) config->cpu_mode >= APP_CPU_MODE_COUNT || (unsigned) config->build_effect >= APP_BUILD_EFFECT_COUNT ||
+        !app_light_settings_valid(&snapshot->lights) || !app_ota_settings_valid(&snapshot->ota) ||
+        !terminated(config->jenkins_url, sizeof(config->jenkins_url)) ||
+        !terminated(config->jenkins_user, sizeof(config->jenkins_user)) ||
+        !terminated(config->jenkins_token, sizeof(config->jenkins_token)) ||
+        !terminated(config->jenkins_job_path, sizeof(config->jenkins_job_path))) return false;
+    char hostname[APP_HOSTNAME_MAX_LENGTH + 1];
+    if (!app_hostname_normalize(snapshot->hostname, hostname) || strcmp(hostname, snapshot->hostname)) return false;
+    bool visible = false;
+    for (const unsigned char *p = (const unsigned char *) snapshot->title; *p; ++p) {
+        if (*p < 32 || *p == 127) return false;
+        if (*p > 32) visible = true;
+    }
+    if (!visible) return false;
+    if (config->jenkins_url[0]) {
+        if (!app_config_jenkins_is_valid(config) || strpbrk(config->jenkins_url, "\r\n?#") ||
+            (config->jenkins_job_path[0] && (strncmp(config->jenkins_job_path, "/job/", 5) ||
+             strpbrk(config->jenkins_job_path, "\r\n?#")))) return false;
+    } else if (config->jenkins_user[0] || config->jenkins_token[0] || config->jenkins_job_path[0]) return false;
+    for (uint8_t i = 0; i < snapshot->wifi.count; ++i) {
+        const app_wifi_profile_t *profile = &snapshot->wifi.entries[i];
+        if (!terminated(profile->ssid, sizeof(profile->ssid)) || !profile->ssid[0] ||
+            !terminated(profile->username, sizeof(profile->username)) ||
+            !terminated(profile->password, sizeof(profile->password)) ||
+            (unsigned) profile->auth >= APP_WIFI_AUTH_COUNT ||
+            (profile->auth == APP_WIFI_AUTH_ENTERPRISE && (!profile->username[0] || !profile->password[0]))) return false;
+        for (uint8_t j = 0; j < i; ++j) if (!strcmp(profile->ssid, snapshot->wifi.entries[j].ssid)) return false;
+    }
+    return true;
+}
+
+esp_err_t app_settings_snapshot_stage(const app_settings_snapshot_t *snapshot)
+{
+    if (!app_settings_snapshot_valid(snapshot) || snapshot->branding_slots[0] > 2 ||
+        snapshot->branding_slots[1] > 2) return ESP_ERR_INVALID_ARG;
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(app_config_store_staging_namespace(), NVS_READWRITE, &handle);
+    if (err != ESP_OK) return err;
+#define SAVE(call) do { if (err == ESP_OK) err = (call); } while (0)
+    SAVE(nvs_erase_all(handle));
+    SAVE(nvs_set_u8(handle, NVS_KEY_WIFI_COUNT, snapshot->wifi.count));
+    SAVE(nvs_set_u8(handle, NVS_KEY_WIFI_LAST, snapshot->wifi.last_index));
+    SAVE(nvs_set_u8(handle, NVS_KEY_WIFI_ORDERED, 1));
+    for (uint8_t i = 0; i < snapshot->wifi.count && err == ESP_OK; ++i) {
+        const app_wifi_profile_t *profile = &snapshot->wifi.entries[i];
+        char key[16];
+        wifi_profile_key(key, NVS_KEY_WIFI_SSID, i); SAVE(nvs_set_str(handle, key, profile->ssid));
+        wifi_profile_key(key, NVS_KEY_WIFI_USERNAME, i); SAVE(nvs_set_str(handle, key, profile->username));
+        wifi_profile_key(key, NVS_KEY_WIFI_PASSWORD, i); SAVE(nvs_set_str(handle, key, profile->password));
+        wifi_profile_key(key, NVS_KEY_WIFI_AUTH, i); SAVE(nvs_set_u8(handle, key, profile->auth));
+    }
+    const app_config_t *config = &snapshot->config;
+    SAVE(nvs_set_str(handle, NVS_KEY_JENKINS_URL, config->jenkins_url));
+    SAVE(nvs_set_str(handle, NVS_KEY_JENKINS_JOB_PATH, config->jenkins_job_path));
+    SAVE(nvs_set_str(handle, NVS_KEY_JENKINS_USER, config->jenkins_user));
+    SAVE(nvs_set_str(handle, NVS_KEY_JENKINS_TOKEN, config->jenkins_token));
+    SAVE(nvs_set_u32(handle, NVS_KEY_JENKINS_POLL_INTERVAL, config->jenkins_poll_interval_minutes));
+    SAVE(nvs_set_u32(handle, NVS_KEY_JENKINS_LIST_TIMEOUT, config->jenkins_job_list_timeout_seconds));
+    SAVE(nvs_set_u32(handle, NVS_KEY_JENKINS_STATUS_TIMEOUT, config->jenkins_status_timeout_seconds));
+    SAVE(nvs_set_u8(handle, NVS_KEY_LIGHT_BRIGHTNESS, config->light_brightness_percent));
+    SAVE(nvs_set_u8(handle, NVS_KEY_BUILD_EFFECT, config->build_effect));
+    SAVE(nvs_set_u8(handle, NVS_KEY_CPU_MODE, config->cpu_mode));
+    SAVE(nvs_set_str(handle, NVS_KEY_UI_LANGUAGE, snapshot->language));
+    SAVE(nvs_set_str(handle, NVS_KEY_SITE_TITLE, snapshot->title));
+    SAVE(nvs_set_str(handle, NVS_KEY_HOSTNAME, snapshot->hostname));
+    SAVE(nvs_set_str(handle, NVS_KEY_ADMIN_USERNAME, snapshot->admin_username));
+    SAVE(nvs_set_blob(handle, NVS_KEY_ADMIN_SALT, snapshot->admin_salt, sizeof(snapshot->admin_salt)));
+    SAVE(nvs_set_blob(handle, NVS_KEY_ADMIN_HASH, snapshot->admin_hash, sizeof(snapshot->admin_hash)));
+    SAVE(nvs_set_blob(handle, "lights", &snapshot->lights, sizeof(snapshot->lights)));
+    SAVE(nvs_set_blob(handle, "ota_auto", &snapshot->ota, sizeof(snapshot->ota)));
+    SAVE(nvs_set_blob(handle, "ota_history", &snapshot->ota_history, sizeof(snapshot->ota_history)));
+    SAVE(nvs_set_u8(handle, "brand_logo", snapshot->branding_slots[0]));
+    SAVE(nvs_set_u8(handle, "brand_icon", snapshot->branding_slots[1]));
+    SAVE(nvs_commit(handle));
+#undef SAVE
+    nvs_close(handle);
     return err;
 }

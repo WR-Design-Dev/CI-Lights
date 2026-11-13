@@ -25,6 +25,12 @@ typedef struct {
 } app_branding_info_t;
 
 bool app_branding_get_info(app_branding_kind_t kind, app_branding_info_t *info);
+bool app_branding_data_valid(app_branding_format_t format, const uint8_t *data, size_t length);
 esp_err_t app_branding_read(app_branding_kind_t kind, void *buffer, size_t length);
 esp_err_t app_branding_save(app_branding_kind_t kind, app_branding_format_t format,
                             const void *data, size_t length);
+esp_err_t app_branding_pin_active(void);
+void app_branding_active_slots(uint8_t slots[2]);
+/* Writes an inactive slot, visible only after the settings bank is committed. */
+esp_err_t app_branding_stage(app_branding_kind_t kind, app_branding_format_t format,
+                             const void *data, size_t length, uint8_t *slot);

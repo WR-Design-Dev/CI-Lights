@@ -33,6 +33,14 @@ Die neue Firmware bestätigt einen erfolgreichen lokalen Start nach zehn Sekunde
 ein Neustart vor dieser Bestätigung führt zur vorherigen Firmware zurück.
 Einrichtung und gespeicherte Daten bleiben bei OTA-Updates erhalten.
 
+Unter **Konfiguration → Konfiguration exportieren** lässt sich die komplette
+Gerätekonfiguration als Datei sichern. Ein eigenes Sicherungspasswort verschlüsselt
+auch WLAN-Zugänge, Jenkins-Token und Verwaltungskonto. **Konfiguration importieren**
+steht in der Verwaltung und bei der ersten Einrichtung bereit: Datei auswählen,
+Passwort eingeben, Zusammenfassung prüfen und die Übernahme bestätigen. Nach dem
+Neustart gelten die Einstellungen und der Verwaltungszugang aus der Sicherung.
+[Umfang und Wiederherstellung](docs/konfigurationssicherung.md).
+
 Im selben Panel **Firmware-Updates → Automatische Updates** kannst du die
 Automatik einschalten: nur nach Updates suchen oder automatisch installieren,
 wahlweise sofort oder täglich zu einer Uhrzeit. Standard ist **Aus**; das

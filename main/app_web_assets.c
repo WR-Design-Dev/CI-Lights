@@ -132,30 +132,7 @@ static bool requested_kind(httpd_req_t *request, app_branding_kind_t *kind)
     return true;
 }
 
-static bool asset_signature_valid(app_branding_format_t format,
-                                  const uint8_t *data, size_t length)
-{
-    static const uint8_t png_header[] = {137, 80, 78, 71, 13, 10, 26, 10};
-    if (format == APP_BRANDING_PNG) {
-        return length >= sizeof(png_header) &&
-               memcmp(data, png_header, sizeof(png_header)) == 0;
-    }
-    if (format == APP_BRANDING_ICO) {
-        return length >= 6 && data[0] == 0 && data[1] == 0 &&
-               data[2] == 1 && data[3] == 0 && (data[4] != 0 || data[5] != 0);
-    }
-    if (format == APP_BRANDING_SVG) {
-        size_t prefix = length < 512 ? length : 512;
-        for (size_t i = 0; i + 4 < prefix; ++i) {
-            if (data[i] == '<' && memcmp(data + i, "<svg", 4) == 0 &&
-                (data[i + 4] == ' ' || data[i + 4] == '\n' ||
-                 data[i + 4] == '\r' || data[i + 4] == '\t' || data[i + 4] == '>')) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
+
 
 static esp_err_t branding_upload_error(httpd_req_t *request, const char *status,
                                        const char *message)
@@ -215,7 +192,7 @@ esp_err_t app_web_branding_upload_handler(httpd_req_t *request)
         }
         received += count;
     }
-    if (!asset_signature_valid(format, data, request->content_len)) {
+    if (!app_branding_data_valid(format, data, request->content_len)) {
         heap_caps_free(data);
         return branding_upload_error(request, "400 Bad Request",
                                      "Dateiinhalt passt nicht zum Format.");

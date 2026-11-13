@@ -91,6 +91,22 @@ static uint32_t s_settings_revision;
 typedef enum { OTA_MANUAL_CHECK, OTA_MANUAL_INSTALL, OTA_AUTO_CHECK, OTA_AUTO_INSTALL } ota_request_t;
 static void set_phase(const char *phase, const char *message);
 
+bool app_ota_begin_config_transfer(void)
+{
+    portENTER_CRITICAL(&s_status_lock);
+    bool allowed = !s_status.busy && !s_status.boot_pending;
+    if (allowed) s_status.busy = true;
+    portEXIT_CRITICAL(&s_status_lock);
+    return allowed;
+}
+
+void app_ota_end_config_transfer(void)
+{
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.busy = false;
+    portEXIT_CRITICAL(&s_status_lock);
+}
+
 static bool clock_valid(void)
 {
     portENTER_CRITICAL(&s_status_lock);

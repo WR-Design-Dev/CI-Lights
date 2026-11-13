@@ -7,6 +7,8 @@
 
 void app_ota_init(void);
 void app_ota_start_automation(void);
+bool app_ota_begin_config_transfer(void);
+void app_ota_end_config_transfer(void);
 /* Called after storage, LEDs and a local web server have started successfully. */
 void app_ota_confirm_startup(bool web_server_ready);
 

@@ -105,6 +105,19 @@ void app_main(void)
         return;
     }
 
+    app_light_settings_t light_preferences;
+    esp_err_t light_err = app_light_settings_load(&light_preferences);
+    if (light_err != ESP_OK) ESP_LOGW(TAG, "LED-Einstellungen konnten nicht geladen werden: %s", esp_err_to_name(light_err));
+    traffic_light_set_control_mode(APP_CONTROL_MODE_MANUAL);
+    for (unsigned i = 0; i < 3; ++i) {
+        traffic_light_set_manual_color((app_manual_light_t) i, light_preferences.colors[i][0],
+                                       light_preferences.colors[i][1], light_preferences.colors[i][2]);
+        traffic_light_set_manual((app_manual_light_t) i, light_preferences.enabled[i]);
+    }
+    traffic_light_set_disco_effect(light_preferences.disco_effect);
+    traffic_light_set_control_mode(light_preferences.mode);
+    if (light_preferences.mode == APP_CONTROL_MODE_API) traffic_light_set_api_status(APP_LIGHT_STATUS_OFF);
+
     app_start_status_server(&config, jenkins_client_request, traffic_light_set_manual,
                             traffic_light_manual_state, jenkins_client_set_control_mode,
                             traffic_light_control_mode, traffic_light_set_api_status,

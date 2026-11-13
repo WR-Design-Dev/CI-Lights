@@ -2,6 +2,8 @@
 #define LOG_LOCAL_LEVEL ESP_LOG_INFO
 
 #include "app_config.h"
+#include "app_backup.h"
+#include "app_backup_ui.h"
 #include "app_hostname.h"
 #include "app_cpu.h"
 #include "app_ota.h"
@@ -79,6 +81,7 @@
 
 static const char *TAG = "provision";
 static const char *HTTP_TAG = "lights_http";
+static bool s_restart_pending;
 
 static bool request_has_admin_credentials(httpd_req_t *request)
 {
@@ -126,6 +129,9 @@ static esp_err_t protected_handler(httpd_req_t *request)
         }
         httpd_resp_set_hdr(request, "Cache-Control", "no-store");
         err = httpd_resp_sendstr(request, "Verwaltungspasswort erforderlich.");
+    } else if (s_restart_pending && request->method != HTTP_GET) {
+        httpd_resp_set_status(request, "409 Conflict");
+        err = httpd_resp_sendstr(request, "Neustart wird bereits vorbereitet.");
     } else {
         const httpd_uri_t *original = request->user_ctx;
         err = original->handler(request);
@@ -245,7 +251,6 @@ static esp_err_t site_title_post_handler(httpd_req_t *request)
 
 static httpd_handle_t s_provision_server;
 static httpd_handle_t s_status_server;
-static bool s_restart_pending;
 static bool s_wifi_scan_running;
 static char s_provision_ssid[33];
 static char s_provision_url[24];
@@ -316,7 +321,8 @@ static esp_err_t provision_page_handler(httpd_req_t *request)
         "p{line-height:1.55}label{display:block;margin-top:1rem;font-weight:700}input,select{width:100%%;margin-top:.4rem;border:1px solid #b8c9d6;border-radius:.7rem;padding:.85rem;font:inherit}input:focus,select:focus{outline:3px solid #b9d7fa;border-color:var(--blue)}.wifi-name-field{position:relative}.wifi-name-field input{padding-right:3.1rem}.wifi-name-field button{position:absolute;right:.3rem;bottom:.3rem;width:2.45rem;min-height:0;margin:0;padding:.45rem;border-radius:.5rem;font-size:1.35rem;line-height:1;color:#fff}"
         "button{width:100%%;margin-top:1.4rem;border:0;border-radius:.7rem;background:var(--navy);color:#fff;padding:.9rem 1rem;font:700 1rem inherit;box-shadow:0 .35rem .8rem rgba(31,41,55,.2)}button:active{transform:translateY(1px)}"
         ".notice{padding:.85rem 1rem;border-left:.3rem solid var(--green);background:#f1f9e7;border-radius:.4rem}.meta{display:grid;gap:.5rem;padding:1rem;background:#f4f8fb;border:1px solid #d3e2ee;border-radius:.7rem}.meta-label{color:var(--muted);font-size:.88rem;font-weight:700}.device-url,.device-mac{display:block;word-break:break-word;color:var(--navy);font-weight:800;line-height:1.25}.device-url{font-size:clamp(1.2rem,5vw,1.7rem)}.device-mac{font-size:clamp(1.1rem,4.5vw,1.45rem);letter-spacing:.04em}#status{min-height:1.5rem;white-space:pre-wrap;color:var(--navy);font-weight:600}"
-        "@media(max-width:360px){.page{padding:.75rem}.card{padding:1.1rem;border-radius:1rem}.portal-layout{grid-template-columns:minmax(0,1fr) 3.5rem;gap:.7rem}}</style><script src=\"/security.js\" defer></script></head><body>"
+        CONFIG_TRANSFER_STYLE
+        "@media(max-width:360px){.page{padding:.75rem}.card{padding:1.1rem;border-radius:1rem}.portal-layout{grid-template-columns:minmax(0,1fr) 3.5rem;gap:.7rem}}</style><script src=\"/security.js\" defer></script><script src=\"/backup.js\" defer></script></head><body>"
         "<main class=\"page\">" LANGUAGE_SWITCH_HTML
         "<header class=\"brand\" style=\"display:none\"><img src=\"/logo.svg\" alt=\"Logo\" onload=\"this.parentElement.style.display=\'flex\'\" onerror=\"this.parentElement.style.display=\'none\'\"></header><section class=\"card\">"
         "<div class=\"portal-layout\"><aside class=\"traffic-light\" aria-label=\"CI-Lights\"><img class=\"traffic-light-top\" src=\"/traffic-light.svg\" alt=\"CI-Lights\"><div class=\"traffic-light-middle\"></div><div class=\"traffic-light-base\"></div></aside><div>"
@@ -328,7 +334,9 @@ static esp_err_t provision_page_handler(httpd_req_t *request)
         "%s"
         "%s"
         "%s"
-        "<button type=\"submit\">Speichern und neu starten</button></form><p id=\"status\"></p></div></div></section></main>"
+        "<button type=\"submit\">Speichern und neu starten</button></form><p id=\"status\"></p>"
+        CONFIG_IMPORT_HTML
+        "</div></div></section></main>"
         "<script src=\"/localization.js\"></script><script src=\"/wifi.js\"></script><script>const form=document.querySelector('#config'),wifiSetup=ciLightsWifi.forForm(form),networks=document.querySelector('#wifi-networks'),status=document.querySelector('#status'),refreshNetworks=document.querySelector('#refresh-networks');let provisionStatusSource='';function showProvisionStatus(message){provisionStatusSource=message;status.textContent=message.startsWith('Fehler: ')?uiI18n.t('Fehler: ')+uiI18n.response(message.slice(8)):uiI18n.response(message)}"
         "async function loadNetworks(){refreshNetworks.disabled=true;networks.replaceChildren();showProvisionStatus('Suche nach WLANs ...');const r=await fetch('/api/wifi-networks');if(!r.ok)throw new Error(await r.text());const data=await r.json();wifiSetup.setNetworks(data.details);refreshNetworks.disabled=false;showProvisionStatus(data.networks.length?'':'Keine WLANs gefunden. Du kannst den Namen auch manuell eingeben.')}"
         "if(refreshNetworks)refreshNetworks.addEventListener('click',()=>loadNetworks().catch(error=>{refreshNetworks.disabled=false;showProvisionStatus('Fehler: '+error.message)}));"
@@ -681,6 +689,98 @@ static esp_err_t provision_config_handler(httpd_req_t *request)
         ESP_LOGE(TAG, "Neustart-Task konnte nicht erstellt werden");
     }
     return ESP_OK;
+}
+
+static void restart_after_import(void *argument)
+{
+    (void) argument;
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    esp_restart();
+}
+
+static esp_err_t config_transfer_handler(httpd_req_t *request)
+{
+    if (s_restart_pending) return send_provision_error(request, "409 Conflict", "Neustart wird bereits vorbereitet.");
+    char type[48];
+    if (request->content_len < 1 || request->content_len > APP_BACKUP_MAX_FILE_BYTES + 1024 ||
+        httpd_req_get_hdr_value_str(request, "Content-Type", type, sizeof(type)) != ESP_OK || strcmp(type, "application/json"))
+        return send_provision_error(request, "400 Bad Request", "Ungültige Konfigurationsdatei oder Dateigröße.");
+    bool exporting = !strcmp(request->uri, "/api/config/export");
+    bool importing = !strcmp(request->uri, "/api/config/import");
+    if (exporting && request->content_len > 1024) return send_provision_error(request, "400 Bad Request", "Ungültige Export-Anfrage.");
+    char *body = calloc(1, request->content_len + 1);
+    if (!body) return send_provision_error(request, "500 Internal Server Error", "Nicht genug Speicher.");
+    int received = 0;
+    while (received < request->content_len) {
+        int count = httpd_req_recv(request, body + received, request->content_len - received);
+        if (count <= 0) {
+            mbedtls_platform_zeroize(body, request->content_len); free(body);
+            return send_provision_error(request, "400 Bad Request", "Konfigurationsdatei konnte nicht gelesen werden.");
+        }
+        received += count;
+    }
+    cJSON *json = memchr(body, 0, received) ? NULL : app_backup_json_parse(body);
+    mbedtls_platform_zeroize(body, received); free(body);
+    const cJSON *password = cJSON_GetObjectItemCaseSensitive(json, "password");
+    const cJSON *confirmation = cJSON_GetObjectItemCaseSensitive(json, "password_confirm");
+    const cJSON *backup = cJSON_GetObjectItemCaseSensitive(json, "backup");
+    bool valid = cJSON_IsObject(json) && cJSON_IsString(password) && app_backup_password_valid(password->valuestring) &&
+        (exporting ? cJSON_IsString(confirmation) && !strcmp(password->valuestring, confirmation->valuestring) : cJSON_IsObject(backup)) &&
+        (!importing || cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json, "confirmed")));
+    if (!valid) {
+        app_backup_json_delete(json);
+        return send_provision_error(request, "400 Bad Request", "Sicherungsdatei, Passwort oder Import-Bestätigung ungültig.");
+    }
+    if (!app_ota_begin_config_transfer()) {
+        app_backup_json_delete(json);
+        return send_provision_error(request, "409 Conflict", "Ein Firmware-Update läuft. Konfiguration bitte danach übertragen.");
+    }
+    TaskHandle_t restart = NULL;
+    esp_err_t err = ESP_OK;
+    cJSON *result = NULL;
+    if (importing && xTaskCreate(restart_after_import, "config_restart", 4096, NULL, 3, &restart) != pdPASS) err = ESP_ERR_NO_MEM;
+    if (err == ESP_OK) {
+        if (exporting) err = app_backup_export(password->valuestring, &result);
+        else if (importing) err = app_backup_import(password->valuestring, backup);
+        else err = app_backup_validate(password->valuestring, backup, &result);
+    }
+    app_backup_json_delete(json);
+    if (err != ESP_OK || !importing) app_ota_end_config_transfer();
+    if (err != ESP_OK) {
+        if (restart) vTaskDelete(restart);
+        cJSON_Delete(result);
+        bool invalid = err == ESP_ERR_INVALID_ARG || err == ESP_ERR_INVALID_SIZE || err == ESP_ERR_INVALID_CRC;
+        return send_provision_error(request, invalid ? "400 Bad Request" : "500 Internal Server Error",
+            err == ESP_ERR_INVALID_CRC ? "Sicherungspasswort falsch oder Datei beschädigt." : invalid ?
+            "Konfigurationsdatei ungültig oder nicht mit dieser Firmware kompatibel." :
+            "Konfiguration konnte nicht übertragen werden. Speicher und Verbindung prüfen.");
+    }
+    httpd_resp_set_type(request, "application/json; charset=utf-8");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(request, "X-Content-Type-Options", "nosniff");
+    if (importing) {
+        s_restart_pending = true;
+        esp_err_t sent = httpd_resp_sendstr(request, "{\"restarting\":true}");
+        xTaskNotifyGive(restart);
+        return sent;
+    }
+    if (exporting) httpd_resp_set_hdr(request, "Content-Disposition", "attachment; filename=\"CI-Lights-Konfiguration.json\"");
+    char *response = cJSON_PrintUnformatted(result);
+    cJSON_Delete(result);
+    if (!response) return send_provision_error(request, "500 Internal Server Error", "Nicht genug Speicher.");
+    esp_err_t sent = httpd_resp_sendstr(request, response);
+    free(response);
+    return sent;
+}
+
+extern const unsigned char backup_js_start[] asm("_binary_backup_js_start");
+extern const unsigned char backup_js_end[] asm("_binary_backup_js_end");
+static esp_err_t backup_script_handler(httpd_req_t *request)
+{
+    httpd_resp_set_type(request, "application/javascript; charset=utf-8");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-cache");
+    return httpd_resp_send(request, (const char *) backup_js_start, backup_js_end - backup_js_start - 1);
 }
 
 static esp_err_t status_wifi_get_handler(httpd_req_t *request)
@@ -1101,6 +1201,11 @@ static const httpd_uri_t provision_config_uri = {
     .method = HTTP_POST,
     .handler = provision_config_handler,
 };
+
+static const httpd_uri_t backup_script_uri = {.uri = "/backup.js", .method = HTTP_GET, .handler = backup_script_handler};
+static const httpd_uri_t config_export_uri = {.uri = "/api/config/export", .method = HTTP_POST, .handler = config_transfer_handler};
+static const httpd_uri_t config_validate_uri = {.uri = "/api/config/validate", .method = HTTP_POST, .handler = config_transfer_handler};
+static const httpd_uri_t config_import_uri = {.uri = "/api/config/import", .method = HTTP_POST, .handler = config_transfer_handler};
 
 static const httpd_uri_t provision_wifi_networks_uri = {
     .uri = "/api/wifi-networks",
@@ -1798,6 +1903,11 @@ static esp_err_t status_manual_light_handler(httpd_req_t *request)
     bool light_enabled = cJSON_IsTrue(enabled);
     cJSON_Delete(json);
 
+    app_light_settings_t preferences;
+    esp_err_t save_err = app_light_settings_load(&preferences);
+    preferences.enabled[light] = light_enabled;
+    if (save_err == ESP_OK) save_err = app_light_settings_save(&preferences);
+    if (save_err != ESP_OK) return send_status_error(request, "500 Internal Server Error", "LED-Einstellungen konnten nicht gespeichert werden.");
     s_manual_light_handler(light, light_enabled);
     char response[48];
     snprintf(response, sizeof(response), "%s ist jetzt %s.", light_label,
@@ -1859,6 +1969,11 @@ static esp_err_t status_manual_light_color_handler(httpd_req_t *request)
         return send_status_error(request, "400 Bad Request", "Ungültige LED-Farbe.");
     }
 
+    app_light_settings_t preferences;
+    esp_err_t save_err = app_light_settings_load(&preferences);
+    preferences.colors[light][0] = red; preferences.colors[light][1] = green; preferences.colors[light][2] = blue;
+    if (save_err == ESP_OK) save_err = app_light_settings_save(&preferences);
+    if (save_err != ESP_OK) return send_status_error(request, "500 Internal Server Error", "LED-Einstellungen konnten nicht gespeichert werden.");
     traffic_light_set_manual_color(light, red, green, blue);
     char response[64];
     snprintf(response, sizeof(response), "Farbe für %s gesetzt.", light_label);
@@ -1967,6 +2082,11 @@ static esp_err_t status_disco_effect_handler(httpd_req_t *request)
     }
 
     cJSON_Delete(json);
+    app_light_settings_t preferences;
+    esp_err_t save_err = app_light_settings_load(&preferences);
+    preferences.disco_effect = effect;
+    if (save_err == ESP_OK) save_err = app_light_settings_save(&preferences);
+    if (save_err != ESP_OK) return send_status_error(request, "500 Internal Server Error", "LED-Einstellungen konnten nicht gespeichert werden.");
     s_disco_effect_handler(effect);
     httpd_resp_set_type(request, "text/plain; charset=utf-8");
     return httpd_resp_sendstr(request, "Disco-Animation aktiviert.");
@@ -2177,6 +2297,11 @@ static esp_err_t status_control_mode_handler(httpd_req_t *request)
     }
 
     cJSON_Delete(json);
+    app_light_settings_t preferences;
+    esp_err_t save_err = app_light_settings_load(&preferences);
+    preferences.mode = mode;
+    if (save_err == ESP_OK) save_err = app_light_settings_save(&preferences);
+    if (save_err != ESP_OK) return send_status_error(request, "500 Internal Server Error", "LED-Einstellungen konnten nicht gespeichert werden.");
     s_control_mode_handler(mode);
     httpd_resp_set_type(request, "text/plain; charset=utf-8");
     if (mode == APP_CONTROL_MODE_AUTO) {
@@ -2386,11 +2511,12 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         ".portal-layout{display:grid;grid-template-columns:minmax(0,1fr) 5.4rem;gap:1.15rem;align-items:stretch}.portal-layout>div{grid-column:1;grid-row:1}.traffic-light{display:flex;grid-column:2;grid-row:1;min-height:100%;flex-direction:column;align-items:center;filter:drop-shadow(0 .35rem .55rem rgba(31,41,55,.18))}.traffic-light-top{display:block;width:100%;height:auto;flex:0 0 auto;margin-bottom:-.55rem;position:relative;z-index:1}.traffic-light-middle{width:1.15rem;min-height:1rem;flex:1 1 auto;background:linear-gradient(90deg,#1f2937 0,#1f2937 34%,#2563eb 34%,#2563eb 55%,#1f2937 55%)}.traffic-light-base{width:100%;height:1rem;flex:0 0 auto;background:linear-gradient(145deg,#374151,#111827);clip-path:polygon(10% 0,90% 0,100% 100%,0 100%)}.poll-settings{margin-top:2rem;padding-top:1.4rem;border-top:1px solid #dbe7ef}.poll-settings h2{margin-bottom:.35rem}.manual-override{width:100%;margin:.75rem 0 .25rem;background:#e8f1f8;color:var(--navy);box-shadow:none}.manual-override[aria-pressed=\"true\"]{background:var(--green);color:#163100}.manual-controls,.manual-color-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.6rem;margin-top:1rem}.manual-controls button{margin:0;background:#e8f1f8;color:var(--navy);box-shadow:none}.manual-controls button[aria-pressed=\"true\"]{background:var(--green);color:#163100}.manual-color-controls label{margin:0;color:var(--navy);font-size:.85rem}.manual-color-controls input{height:2.8rem;padding:.2rem}.light-state{margin:.7rem 0 0;color:var(--muted);font-size:.87rem;line-height:1.4}.hint{color:var(--muted);font-size:.93rem}#status{display:none;margin:0 0 .5rem;padding:.85rem 1rem;border:1px solid #c7d9e8;border-left:.35rem solid var(--blue);border-radius:.55rem;background:#f2f8fd;white-space:pre-wrap;color:var(--navy);font-weight:650}#status:not(:empty){display:block}#status[data-error=\"true\"]{border-color:#f1b7be;border-left-color:#c6283b;background:#fff0f1;color:#a11227}"
         ".brightness-control{display:grid;gap:.45rem;margin:0 0 1rem;padding:.8rem 1rem;border:1px solid #dbe7ef;border-radius:.85rem;background:#fff;box-shadow:0 .35rem .8rem rgba(31,41,55,.06)}.brightness-label{margin:0;color:var(--navy);font-size:.95rem}.brightness-row{display:flex;align-items:center;gap:.8rem}.brightness-row input{margin:0}.brightness-row output{min-width:3.5rem;color:var(--navy);font-weight:800;text-align:right}.disco-controls{margin-top:1rem;padding:1rem;border:1px solid #dbe7ef;border-radius:.75rem;background:#f4f8fb}.disco-controls[hidden]{display:none}.disco-controls label{margin-top:0}"
         OTA_AUTOMATION_STYLE
+        CONFIG_TRANSFER_STYLE
         ".device-footer{margin-top:1rem;padding:1.15rem 1.3rem;border:1px solid #dbe7ef;border-radius:1rem;background:#fff;box-shadow:0 .45rem 1.2rem rgba(31,41,55,.06)}.device-footer summary{cursor:pointer;color:var(--navy);font-size:1.1rem;font-weight:750}.device-footer summary:focus-visible{outline:3px solid #b9d7fa;outline-offset:3px}.device-info{display:grid;grid-template-columns:repeat(auto-fit,minmax(17rem,1fr));gap:.8rem;margin-top:.9rem}.device-group{min-width:0;padding:.85rem 1rem;border:1px solid #dbe7ef;border-radius:.75rem;background:#f5f9fc}.device-group h3{margin:0 0 .6rem;color:var(--navy);font-size:.88rem}.device-metrics{display:grid;gap:.4rem;margin:0}.device-metric{display:flex;justify-content:space-between;align-items:baseline;gap:.7rem;min-width:0;padding-bottom:.35rem;border-bottom:1px solid #e1eaf1}.device-metric:last-child{padding-bottom:0;border-bottom:0}.device-metric dt{color:var(--muted);font-size:.78rem;font-weight:700}.device-metric dd{min-width:0;margin:0;overflow-wrap:anywhere;text-align:right;font-size:.86rem;font-weight:650;font-variant-numeric:tabular-nums}.device-message{margin:0;color:var(--muted);font-size:.9rem}"
         "#toast{position:fixed;z-index:10;top:1rem;right:1rem;width:min(calc(100vw - 2rem),28rem);padding:1rem 1.25rem;border-radius:.85rem;background:#357b12;color:#fff;font-weight:750;line-height:1.4;text-align:center;box-shadow:0 1rem 2.5rem rgba(16,42,67,.3);opacity:0;pointer-events:none;transform:translateY(-.5rem);transition:opacity .2s ease,transform .2s ease}#toast.show{opacity:1;transform:translateY(0)}"
         "#job-loading,#jenkins-loading{position:fixed;z-index:20;inset:0;display:none;align-items:center;justify-content:center;padding:1rem;background:rgba(16,42,67,.42)}#job-loading.show,#jenkins-loading.show{display:flex}.job-loading-card{display:flex;align-items:center;gap:.8rem;padding:1rem 1.25rem;border-radius:.85rem;background:#fff;color:var(--navy);font-weight:750;box-shadow:0 1rem 2.5rem rgba(16,42,67,.3)}.spinner{width:1.7rem;height:1.7rem;flex:0 0 auto;border:.25rem solid #c8d9e8;border-top-color:var(--blue);border-radius:50%;animation:job-spin .8s linear infinite}@keyframes job-spin{to{transform:rotate(360deg)}}"
         ".login-overlay{position:fixed;z-index:100;inset:0;display:flex;align-items:center;justify-content:center;padding:1rem;background:rgba(16,42,67,.55);backdrop-filter:blur(4px)}.login-overlay[hidden]{display:none}.login-card{width:min(100%,27rem);padding:clamp(1.5rem,5vw,2.25rem);border:1px solid #dbe7ef;border-radius:1.25rem;background:#fff;box-shadow:0 1.5rem 3rem rgba(0,32,65,.28)}.login-card h2{margin:.35rem 0 .4rem;font-size:1.6rem}.login-card .hint{margin:0}.login-card button{margin-top:1.25rem}.login-error{min-height:1.3rem;margin:.8rem 0 0;color:#a11227;font-size:.9rem;font-weight:700}"
-        "@media(max-width:430px){.page{padding:.75rem}.card{padding:1.1rem;border-radius:0 0 1rem 1rem}.tabs{padding:0 .4rem}.tabs a{padding:.65rem .3rem;font-size:.78rem}.portal-layout{grid-template-columns:minmax(0,1fr) 3.3rem;gap:.75rem}.manual-controls{grid-template-columns:1fr}}.ota-actions{display:flex;flex-wrap:wrap;gap:.65rem}.ota-settings progress{width:100%;margin-top:1rem}.ota-settings [data-error=\"true\"]{color:#a11227}</style><script src=\"/security.js\" defer></script></head><body>"
+        "@media(max-width:430px){.page{padding:.75rem}.card{padding:1.1rem;border-radius:0 0 1rem 1rem}.tabs{padding:0 .4rem}.tabs a{padding:.65rem .3rem;font-size:.78rem}.portal-layout{grid-template-columns:minmax(0,1fr) 3.3rem;gap:.75rem}.manual-controls{grid-template-columns:1fr}}.ota-actions{display:flex;flex-wrap:wrap;gap:.65rem}.ota-settings progress{width:100%;margin-top:1rem}.ota-settings [data-error=\"true\"]{color:#a11227}</style><script src=\"/security.js\" defer></script><script src=\"/backup.js\" defer></script></head><body>"
         "<div id=\"login-overlay\" class=\"login-overlay\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"login-title\"><form id=\"login-form\" class=\"login-card\"><p class=\"eyebrow\">CI-Lights</p><h2 id=\"login-title\">Verwaltung anmelden</h2><p class=\"hint\">Melde dich mit dem Benutzernamen und Passwort aus der Einrichtung an.</p><label>Benutzername<input id=\"login-username\" name=\"username\" autocomplete=\"username\" required maxlength=\"32\" autofocus></label><label>Passwort<input id=\"login-password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" required></label><p id=\"login-error\" class=\"login-error\" role=\"alert\"></p><button type=\"submit\">Anmelden</button></form></div>"
         "<main id=\"dashboard\" class=\"page\" inert aria-hidden=\"true\">" LANGUAGE_SWITCH_HTML
         "<form id=\"banner-form\" class=\"brand\" data-branding=\"logo\"><img src=\"/logo.svg\" alt=\"Banner\" onload=\"this.parentElement.classList.add('has-banner')\" onerror=\"this.parentElement.classList.remove('has-banner')\"><input id=\"banner-file\" type=\"file\" accept=\".svg,image/svg+xml,.png,image/png\" required hidden><button class=\"banner-upload\" type=\"button\" title=\"Banner hochladen (SVG oder PNG, maximal 32 KiB)\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 16V3m0 0L7 8m5-5 5 5M4 16v4h16v-4\"/></svg><span>Banner hochladen</span></button></form>"
@@ -2416,7 +2542,10 @@ static esp_err_t status_page_handler(httpd_req_t *request)
         "<label>WLAN-Benutzername (nur WPA2-Enterprise)<input name=\"wifi_username\" maxlength=\"127\"></label><label>WLAN-Passwort (bei offenen WLANs leer lassen)<input name=\"wifi_password\" type=\"password\" maxlength=\"63\"></label>"
         "<p class=\"hint\">Bei geschützten WLANs das Passwort erneut eingeben. Ein bereits gespeicherter WLAN-Name wird aktualisiert.</p><button type=\"submit\">WLAN speichern und neu starten</button></form><p id=\"wifi-scan-status\" class=\"hint\" role=\"status\"></p></section>"
         "<section class=\"poll-settings\"><h2>CPU-Takt</h2><p class=\"hint\">Automatisch: im Leerlauf bis 40 MHz, bei WLAN-, Jenkins- und Verwaltungsanfragen bis zur gewählten Obergrenze. Ein Wechsel wirkt sofort und bleibt gespeichert.</p><label>CPU-Modus<select id=\"cpu-mode\"><option value=\"fixed160\">Fest 160 MHz</option><option value=\"auto160\">Automatisch 40–160 MHz</option><option value=\"auto240\">Automatisch 40–240 MHz</option><option value=\"fixed240\">Fest 240 MHz</option></select></label></section>"
-        "<section class=\"branding-settings\"><h2>Branding</h2><p class=\"hint\">Das Banner oben kannst du direkt anklicken und hochladen. Das Favicon wird hier hochgeladen. Beide Dateien bleiben nach einem Neustart im Flash gespeichert.</p><form class=\"branding-item\" data-branding=\"favicon\"><label>Favicon (ICO oder PNG, maximal 32 KiB)<input type=\"file\" accept=\".ico,image/x-icon,image/vnd.microsoft.icon,.png,image/png\" required></label><p class=\"hint\" data-branding-state=\"favicon\" role=\"status\">Noch nicht hochgeladen</p><button type=\"submit\">Favicon hochladen</button></form></section></section>"
+        "<section class=\"branding-settings\"><h2>Branding</h2><p class=\"hint\">Das Banner oben kannst du direkt anklicken und hochladen. Das Favicon wird hier hochgeladen. Beide Dateien bleiben nach einem Neustart im Flash gespeichert.</p><form class=\"branding-item\" data-branding=\"favicon\"><label>Favicon (ICO oder PNG, maximal 32 KiB)<input type=\"file\" accept=\".ico,image/x-icon,image/vnd.microsoft.icon,.png,image/png\" required></label><p class=\"hint\" data-branding-state=\"favicon\" role=\"status\">Noch nicht hochgeladen</p><button type=\"submit\">Favicon hochladen</button></form></section>"
+        CONFIG_EXPORT_HTML
+        CONFIG_IMPORT_HTML
+        "</section>"
         "<section id=\"tab-manual\" class=\"tab\" role=\"tabpanel\"><h2>Ampelsteuerung</h2>"
         "<p class=\"hint\">Wähle, wer die Ampel steuert. Manuell und API setzen Jenkins vollständig aus.</p>"
         "<section class=\"brightness-control\" aria-label=\"LED-Helligkeit\"><label class=\"brightness-label\" for=\"brightness\">LED-Helligkeit</label><div class=\"brightness-row\"><input id=\"brightness\" type=\"range\" min=\"1\" max=\"100\" step=\"1\" value=\"50\"><output id=\"brightness-value\" for=\"brightness\">50 %</output></div></section><label>Betriebsart<select id=\"control-mode\"><option value=\"auto\">Auto (Jenkins)</option><option value=\"manual\">Manuell</option><option value=\"disco\">Disco</option><option value=\"api\">REST API</option></select></label><p id=\"mode-hint\" class=\"hint\"></p><label for=\"build-effect\">Laufender Jenkins-Build<select id=\"build-effect\"><option value=\"pulse\">Pulsieren</option><option value=\"blink\">Blinken (an/aus)</option></select></label><p class=\"hint\">Gilt für die Statusfarbe eines laufenden Jenkins-Builds.</p><section id=\"disco-controls\" class=\"disco-controls\" hidden><label for=\"disco-effect\">Disco-Animation<select id=\"disco-effect\" disabled><option value=\"rainbow\">Rainbow</option><option value=\"colorloop\">Colorloop</option><option value=\"chase\">Chase</option><option value=\"rainbow-chase\">Rainbow Chase</option><option value=\"blink\">Blink</option><option value=\"breathe\">Breathe</option><option value=\"twinkle\">Twinkle</option><option value=\"scan\">Scan</option><option value=\"theater-chase\">Theater Chase</option><option value=\"fireworks\">Fireworks</option></select></label><p class=\"hint\">Zehn kompakte Effekte, angelehnt an WLED.</p></section><div class=\"manual-controls\">"
@@ -2788,7 +2917,7 @@ void app_start_status_server(const app_config_t *config,
     }
 
     httpd_config_t server_config = HTTPD_DEFAULT_CONFIG();
-    server_config.max_uri_handlers = 47;
+    server_config.max_uri_handlers = 51;
     server_config.stack_size = STATUS_HTTP_TASK_STACK_SIZE;
     server_config.lru_purge_enable = true;
     err = httpd_start(&s_status_server, &server_config);
@@ -2797,7 +2926,11 @@ void app_start_status_server(const app_config_t *config,
         app_hostname_stop();
         return;
     }
-    if ((err = httpd_register_uri_handler(s_status_server, &status_page_uri)) != ESP_OK ||
+    if ((err = httpd_register_uri_handler(s_status_server, &backup_script_uri)) != ESP_OK ||
+        (err = register_protected_uri(s_status_server, &config_export_uri)) != ESP_OK ||
+        (err = register_protected_uri(s_status_server, &config_validate_uri)) != ESP_OK ||
+        (err = register_protected_uri(s_status_server, &config_import_uri)) != ESP_OK ||
+        (err = httpd_register_uri_handler(s_status_server, &status_page_uri)) != ESP_OK ||
         (err = httpd_register_uri_handler(s_status_server, &status_login_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &status_device_info_uri)) != ESP_OK ||
         (err = register_protected_uri(s_status_server, &ota_status_uri)) != ESP_OK ||
@@ -2933,9 +3066,12 @@ void app_start_provisioning(void)
     configure_captive_portal_dhcp(ap_netif);
 
     httpd_config_t server_config = HTTPD_DEFAULT_CONFIG();
-    server_config.max_uri_handlers = 13;
+    server_config.max_uri_handlers = 16;
     server_config.stack_size = 10240;
     ESP_ERROR_CHECK(httpd_start(&s_provision_server, &server_config));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(s_provision_server, &backup_script_uri));
+    ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &config_validate_uri));
+    ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &config_import_uri));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &provision_page_uri));
     ESP_ERROR_CHECK(register_protected_uri(s_provision_server, &security_status_uri));
     ESP_ERROR_CHECK(httpd_register_uri_handler(s_provision_server, &security_script_uri));
