@@ -17,6 +17,7 @@ const savedJobs = {jobs: [{name: 'Folder / Build', url: 'https://jenkins.example
 
 function createUi(saved) {
   const elements = new Map(), storage = new Map(), requests = [], jobReplies = [], intervals = [];
+  const lightReplies = [], brightnessReplies = [], documentListeners = {};
   if (saved !== undefined) storage.set(cacheKey('admin'), typeof saved === 'string' ? saved : JSON.stringify(saved));
   function element(selector) {
     if (!elements.has(selector)) {
@@ -49,7 +50,8 @@ function createUi(saved) {
   };
   const context = {
     document: {hidden: false, querySelector: element,
-      querySelectorAll: selector => selector === '[data-tab]' ? tabs : [], addEventListener() {}},
+      querySelectorAll: selector => selector === '[data-tab]' ? tabs : [],
+      addEventListener(name, callback) { documentListeners[name] = callback; }},
     localStorage: {getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value)},
     Option: function(text, value) { this.text = text; this.value = value; },
     FormData: class { *[Symbol.iterator]() { yield ['jenkins_url', 'https://jenkins.example']; } },
@@ -64,6 +66,13 @@ function createUi(saved) {
         assert.ok(jobReplies.length, 'The job list must only be requested by an explicit refresh');
         return jobReplies.shift();
       }
+      if (url === '/api/lights' && lightReplies.length) return lightReplies.shift();
+      if (url === '/api/brightness') {
+        const reply = brightnessReplies.length ? await brightnessReplies.shift() : response();
+        if (reply instanceof Error) throw reply;
+        if (reply.ok) fixtures['/api/lights'].brightness = JSON.parse(options.body).brightness;
+        return reply;
+      }
       return response(fixtures[url]);
     },
   };
@@ -71,10 +80,11 @@ function createUi(saved) {
   vm.runInNewContext(script, context);
   async function fire(selector, eventName = 'submit') {
     const target = element(selector);
-    await target.listeners[eventName]({target, preventDefault() {}});
+    await target.listeners[eventName]?.({target, preventDefault() {}});
     await flush();
   }
   return {element, storage, requests, jobReplies, response, fire, intervals,
+    lightReplies, brightnessReplies, documentListeners, context,
     jobRequests: () => requests.filter(request => request.url === '/api/jobs'),
     async login(username = 'admin') {
       element('#login-username').value = username; element('#login-password').value = 'password';
@@ -166,4 +176,84 @@ function createUi(saved) {
   await corrupt.login();
   assert.equal(corrupt.jobRequests().length, 0, 'A corrupt cache must wait for an explicit refresh');
   console.log('Jenkins UI passed: manual refresh only, persistent cache, slow/error recovery, and configurable timeouts');
+
+  const lights = createUi();
+  await lights.login();
+  const slider = lights.element('#brightness');
+  const brightnessPosts = () => lights.requests.filter(request => request.url === '/api/brightness');
+  const lightState = brightness => lights.response({mode: 'auto', brightness, build_effect: 'pulse'});
+  async function move(value) {
+    slider.value = String(value);
+    await lights.fire('#brightness', 'input');
+  }
+  await lights.fire('#brightness', 'pointerdown');
+  await move(78);
+  await lights.context.loadLightStates();
+  assert.equal(Number(slider.value), 78, 'Periodic status must not move a slider being dragged');
+  assert.equal(lights.element('#brightness-value').textContent, '78 %');
+  assert.equal(brightnessPosts().length, 0, 'Dragging must not write every intermediate value');
+
+  let finishOldPoll, finishWrite, finishDuringWrite;
+  lights.lightReplies.push(new Promise(resolve => { finishOldPoll = resolve; }));
+  const oldPoll = lights.context.loadLightStates();
+  await move(85);
+  lights.brightnessReplies.push(new Promise(resolve => { finishWrite = resolve; }));
+  const saving = lights.fire('#brightness', 'change');
+  await flush();
+  await lights.context.loadLightStates();
+  assert.equal(Number(slider.value), 85, 'Keep the chosen value while it is being saved');
+  lights.lightReplies.push(new Promise(resolve => { finishDuringWrite = resolve; }));
+  const duringWrite = lights.context.loadLightStates();
+  finishWrite(lights.response());
+  await saving;
+  finishOldPoll(lightState(50));
+  finishDuringWrite(lightState(50));
+  await Promise.all([oldPoll, duringWrite]);
+  assert.equal(Number(slider.value), 85, 'Late status replies from before or during saving must be ignored');
+
+  let finishFirst, finishLatest;
+  lights.brightnessReplies.push(new Promise(resolve => { finishFirst = resolve; }),
+    new Promise(resolve => { finishLatest = resolve; }));
+  await move(55);
+  const queuedSaves = lights.fire('#brightness', 'change');
+  await flush();
+  await move(65);
+  await lights.fire('#brightness', 'change');
+  await move(75);
+  await lights.fire('#brightness', 'change');
+  assert.deepEqual(brightnessPosts().map(request => JSON.parse(request.options.body).brightness), [85, 55],
+    'Only one brightness write may be in flight');
+  finishFirst(lights.response());
+  await flush();
+  assert.deepEqual(brightnessPosts().map(request => JSON.parse(request.options.body).brightness), [85, 55, 75],
+    'Rapid changes keep the latest queued value');
+  await move(90);
+  finishLatest(lights.response());
+  await queuedSaves;
+  await lights.context.loadLightStates();
+  assert.equal(Number(slider.value), 90, 'Completing an older save must not overwrite a new drag');
+  await lights.fire('#brightness', 'change');
+  await lights.context.loadLightStates();
+  assert.equal(Number(slider.value), 90);
+  lights.lightReplies.push(lightState(40));
+  await lights.context.loadLightStates();
+  assert.equal(Number(slider.value), 40, 'Idle controls must still reflect external brightness changes');
+
+  for (const failure of [lights.response({}, 'Speichern fehlgeschlagen.'), new Error('Verbindung unterbrochen.')]) {
+    lights.brightnessReplies.push(failure);
+    await move(30);
+    await lights.fire('#brightness', 'change');
+    assert.equal(Number(slider.value), 90, 'A failed save restores the actual device brightness');
+    assert.equal(lights.element('#status').dataset.error, 'true');
+  }
+  await move(95);
+  await lights.fire('#brightness', 'change');
+  await lights.context.loadLightStates();
+  assert.equal(Number(slider.value), 95, 'Saving recovers after HTTP and connection failures');
+  await lights.fire('#brightness', 'pointerdown');
+  lights.documentListeners.pointerup();
+  lights.lightReplies.push(lightState(45));
+  await lights.context.loadLightStates();
+  assert.equal(Number(slider.value), 45, 'Releasing without changing the value resumes synchronization');
+  console.log('Brightness UI passed: dragging, delayed polls, serialized saves, keyboard changes and error recovery');
 })().catch(error => { console.error(error); process.exitCode = 1; });
