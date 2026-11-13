@@ -8,6 +8,7 @@
 #define APP_BACKUP_MAX_PLAIN_BYTES (112 * 1024)
 #define APP_BACKUP_PASSWORD_MIN 12
 #define APP_BACKUP_PASSWORD_MAX 128
+#define APP_BACKUP_PREPARED_SECONDS 600
 
 void app_backup_json_delete(cJSON *json);
 cJSON *app_backup_json_parse(const char *text);
@@ -23,3 +24,6 @@ bool app_backup_password_valid(const char *password);
 esp_err_t app_backup_export(const char *password, cJSON **sealed);
 esp_err_t app_backup_validate(const char *password, const cJSON *sealed, cJSON **summary);
 esp_err_t app_backup_import(const char *password, const cJSON *sealed);
+/* Validation retains one snapshot in RAM; the random ID is consumed on import. */
+esp_err_t app_backup_import_prepared(const char *import_id);
+void app_backup_discard_prepared(void);

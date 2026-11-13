@@ -3,9 +3,10 @@
   const importForm = find('import-form'), exportForm = find('export-form');
   if (!importForm && !exportForm) return;
   const file = find('import-file'), password = find('import-password'), review = find('import-review');
-  const confirm = find('import-confirm'), apply = find('import-apply'), summary = find('import-summary');
-  let busy = false, restarting = false, selected = null, validated = null;
-  let summaryData = null;
+  const confirm = find('import-confirm'), apply = find('import-apply'), direct = find('import-direct'), summary = find('import-summary');
+  const dialog = find('busy');
+  let busy = false, restarting = false, validated = null;
+  let summaryData = null, expiryTimer = null, progressText = null;
   const messages = new Map();
   function message(kind, text, error = false) {
     messages.set(kind, {text, error});
@@ -16,13 +17,29 @@
     for (const form of [importForm, exportForm]) if (form)
       for (const input of form.querySelectorAll('input,button')) input.disabled = busy || restarting;
     if (confirm) confirm.disabled = busy || restarting;
-    if (apply) apply.disabled = busy || restarting || !validated || !confirm.checked;
+    if (apply) { apply.hidden = !validated; apply.disabled = busy || restarting || !validated || !confirm.checked; }
+    if (direct) { direct.hidden = !!validated; direct.disabled = busy || restarting || !confirm.checked; }
   }
   function invalidate() {
-    selected = validated = summaryData = null;
+    clearTimeout(expiryTimer); expiryTimer = null;
+    validated = summaryData = null;
     review.hidden = true; confirm.checked = false; summary.textContent = '';
     message('import', ''); controls();
   }
+  function expireReview() {
+    if (restarting || !validated) return;
+    if (busy) { expiryTimer = setTimeout(expireReview, 1000); return; }
+    invalidate();
+    message('import', 'Die geprüfte Konfiguration ist abgelaufen oder nicht mehr verfügbar. Datei erneut prüfen oder direkt übernehmen.', true);
+  }
+  function progress(title, detail = 'Das dauert ca. 60 Sekunden. Bitte warten.') {
+    progressText = {title, detail};
+    find('busy-title').textContent = uiI18n.t(title);
+    find('busy-detail').textContent = uiI18n.t(detail);
+    if (!dialog.open) dialog.showModal();
+  }
+  function stopProgress() { dialog.close(); progressText = null; }
+  dialog.addEventListener('cancel', event => event.preventDefault());
   function validPassword(value) {
     const length = new TextEncoder().encode(value).length;
     return length >= 12 && length <= 128 && !/[\x00-\x1f\x7f]/.test(value);
@@ -49,41 +66,62 @@
       'Jenkins: ' + (data.jenkins_url || '–'), uiI18n.t('Job:') + ' ' + (data.job_path || '–'),
       uiI18n.t('Verwaltungsbenutzer:') + ' ' + data.admin_username].join('\n');
   }
+  function chosenFile() {
+    const chosen = file.files[0];
+    if (!chosen || chosen.size < 1 || chosen.size > 160 * 1024) {
+      message('import', 'Bitte eine Konfigurationsdatei bis 160 KiB auswählen.', true); return null;
+    }
+    if (!validPassword(password.value)) {
+      message('import', 'Sicherungspasswort: mindestens 12 und höchstens 128 UTF-8-Bytes.', true); return null;
+    }
+    return chosen;
+  }
   if (importForm) {
     file.addEventListener('change', invalidate); password.addEventListener('input', invalidate);
     confirm.addEventListener('change', controls);
     importForm.addEventListener('submit', async event => {
       event.preventDefault(); if (busy || restarting) return;
       invalidate();
-      const chosen = file.files[0];
-      if (!chosen || chosen.size < 1 || chosen.size > 160 * 1024) {
-        message('import', 'Bitte eine Konfigurationsdatei bis 160 KiB auswählen.', true); return;
-      }
-      if (!validPassword(password.value)) { message('import', 'Sicherungspasswort: mindestens 12 und höchstens 128 UTF-8-Bytes.', true); return; }
+      const chosen = chosenFile(); if (!chosen) return;
       busy = true; controls();
       message('import', 'Sicherung wird entschlüsselt und geprüft. Das kann etwas dauern.');
+      progress('Sicherung wird entschlüsselt und geprüft.');
       try {
         const backup = JSON.parse(await chosen.text());
         const response = await request('validate', {password: password.value, backup});
-        summaryData = await response.json(); selected = backup;
-        validated = {password: password.value, file: chosen};
+        summaryData = await response.json();
+        if (!/^[a-f0-9]{64}$/.test(summaryData.import_id) ||
+            !Number.isInteger(summaryData.expires_in_seconds) || summaryData.expires_in_seconds < 1 || summaryData.expires_in_seconds > 600)
+          throw new Error('Die geprüfte Konfiguration ist abgelaufen oder nicht mehr verfügbar. Datei erneut prüfen oder direkt übernehmen.');
+        validated = {id: summaryData.import_id, password: password.value, file: chosen};
+        expiryTimer = setTimeout(expireReview, summaryData.expires_in_seconds * 1000);
         renderSummary(); review.hidden = false;
-        message('import', 'Sicherung geprüft. Zum Übernehmen die Ersetzung bestätigen.');
+        message('import', 'Sicherung geprüft. Für 10 Minuten ohne erneute Entschlüsselung übernehmbar. Zum Übernehmen die Ersetzung bestätigen.');
       } catch (error) { invalidate(); message('import', error instanceof SyntaxError ? 'Die Datei enthält kein gültiges JSON.' : error.message, true); }
-      finally { busy = false; controls(); }
+      finally { stopProgress(); busy = false; controls(); }
     });
-    apply.addEventListener('click', async () => {
-      if (busy || restarting || !validated || !confirm.checked) return;
-      if (validated.password !== password.value || validated.file !== file.files[0]) { invalidate(); return; }
+    async function importConfiguration(prepared) {
+      if (busy || restarting || !confirm.checked || (prepared && !validated)) return;
+      if (prepared && (validated.password !== password.value || validated.file !== file.files[0])) { invalidate(); return; }
+      const chosen = prepared ? null : chosenFile(); if (!prepared && !chosen) return;
       busy = true; controls();
       message('import', 'Konfiguration wird übernommen. Stromversorgung angeschlossen lassen.');
+      progress(prepared ? 'Konfiguration wird übernommen.' : 'Sicherung wird entschlüsselt und übernommen.',
+        prepared ? 'Die bereits geprüfte Konfiguration wird gespeichert. Bitte warten.' : 'Das dauert ca. 60 Sekunden. Bitte warten.');
       try {
-        await request('import', {password: password.value, backup: selected, confirmed: true});
-        restarting = true; password.value = ''; selected = validated = null;
+        const body = prepared ? {import_id: validated.id, confirmed: true} :
+          {password: password.value, backup: JSON.parse(await chosen.text()), confirmed: true};
+        await request('import', body);
+        restarting = true; password.value = ''; clearTimeout(expiryTimer); validated = summaryData = null;
         message('import', 'Konfiguration übernommen. Die Ampel startet neu. Danach mit dem Verwaltungszugang aus der Sicherung anmelden.');
-      } catch (error) { message('import', error.message, true); }
-      finally { busy = false; controls(); }
-    });
+      } catch (error) {
+        if (prepared) invalidate();
+        message('import', error instanceof SyntaxError ? 'Die Datei enthält kein gültiges JSON.' : error.message, true);
+      }
+      finally { stopProgress(); busy = false; controls(); }
+    }
+    apply.addEventListener('click', () => importConfiguration(true));
+    direct.addEventListener('click', () => importConfiguration(false));
   }
   if (exportForm) exportForm.addEventListener('submit', async event => {
     event.preventDefault(); if (busy || restarting) return;
@@ -91,6 +129,7 @@
     if (!validPassword(value)) { message('export', 'Sicherungspasswort: mindestens 12 und höchstens 128 UTF-8-Bytes.', true); return; }
     if (value !== find('export-confirm').value) { message('export', 'Die Sicherungspasswörter stimmen nicht überein.', true); return; }
     busy = true; controls(); message('export', 'Verschlüsselte Sicherung wird erstellt. Das kann etwas dauern.');
+    progress('Verschlüsselte Sicherung wird erstellt.');
     try {
       const response = await request('export', {password: value, password_confirm: value});
       const blob = await response.blob(), url = URL.createObjectURL(blob), link = document.createElement('a');
@@ -99,8 +138,11 @@
       find('export-password').value = find('export-confirm').value = '';
       message('export', 'Verschlüsselte Sicherung heruntergeladen. Sicherungspasswort separat aufbewahren.');
     } catch (error) { message('export', error.message, true); }
-    finally { busy = false; controls(); }
+    finally { stopProgress(); busy = false; controls(); }
   });
-  uiI18n.onChange(() => { for (const [kind, value] of messages) message(kind, value.text, value.error); renderSummary(); });
+  uiI18n.onChange(() => {
+    for (const [kind, value] of messages) message(kind, value.text, value.error);
+    renderSummary(); if (progressText) progress(progressText.title, progressText.detail);
+  });
   controls();
 })();

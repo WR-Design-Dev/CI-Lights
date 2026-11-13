@@ -4,6 +4,9 @@
 #include "app_ota_storage.h"
 #include "traffic_light.h"
 #include "esp_app_desc.h"
+#include "esp_random.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
 #include "mbedtls/platform_util.h"
 #include <stdlib.h>
 #include <string.h>
@@ -16,12 +19,57 @@ typedef struct {
     app_branding_format_t formats[2];
 } imported_t;
 
+static portMUX_TYPE s_prepared_lock = portMUX_INITIALIZER_UNLOCKED;
+static imported_t *s_prepared;
+static char s_import_id[65];
+static int64_t s_expires_at;
+static esp_timer_handle_t s_expiry_timer;
+
 static void free_import(imported_t *imported)
 {
     if (!imported) return;
     for (unsigned i = 0; i < 2; ++i) free(imported->assets[i]);
     mbedtls_platform_zeroize(imported, sizeof(*imported));
     free(imported);
+}
+
+static imported_t *take_prepared_locked(void)
+{
+    imported_t *imported = s_prepared;
+    s_prepared = NULL;
+    mbedtls_platform_zeroize(s_import_id, sizeof(s_import_id));
+    s_expires_at = 0;
+    return imported;
+}
+
+void app_backup_discard_prepared(void)
+{
+    portENTER_CRITICAL(&s_prepared_lock);
+    imported_t *imported = take_prepared_locked();
+    portEXIT_CRITICAL(&s_prepared_lock);
+    free_import(imported);
+}
+
+static void expire_prepared(void *argument)
+{
+    (void) argument;
+    int64_t now = esp_timer_get_time();
+    imported_t *expired = NULL;
+    portENTER_CRITICAL(&s_prepared_lock);
+    if (s_prepared && now >= s_expires_at) expired = take_prepared_locked();
+    portEXIT_CRITICAL(&s_prepared_lock);
+    free_import(expired);
+}
+
+static esp_err_t prepare_expiry_timer(void)
+{
+    if (s_expiry_timer) return ESP_OK;
+    const esp_timer_create_args_t args = {.callback = expire_prepared, .name = "backup_expiry"};
+    esp_err_t err = esp_timer_create(&args, &s_expiry_timer);
+    if (err != ESP_OK) return err;
+    err = esp_timer_start_periodic(s_expiry_timer, 1000000);
+    if (err != ESP_OK) { esp_timer_delete(s_expiry_timer); s_expiry_timer = NULL; }
+    return err;
 }
 
 static bool unique_keys(const cJSON *json, unsigned depth)
@@ -65,6 +113,10 @@ static esp_err_t decode_import(const char *password, const cJSON *sealed, import
         err = app_backup_unbase64(cJSON_GetObjectItemCaseSensitive(item, "data"), imported->assets[i],
                                   APP_BRANDING_MAX_BYTES, &imported->sizes[i]);
         if (err == ESP_OK && !app_branding_data_valid(imported->formats[i], imported->assets[i], imported->sizes[i])) err = ESP_ERR_INVALID_ARG;
+        if (err == ESP_OK) {
+            unsigned char *compact = realloc(imported->assets[i], imported->sizes[i]);
+            if (compact) imported->assets[i] = compact;
+        }
     }
     app_backup_json_delete(json);
     if (err == ESP_OK) *result = imported; else free_import(imported);
@@ -117,6 +169,7 @@ esp_err_t app_backup_export(const char *password, cJSON **sealed)
 esp_err_t app_backup_validate(const char *password, const cJSON *sealed, cJSON **summary)
 {
     *summary = NULL;
+    app_backup_discard_prepared();
     imported_t *imported;
     esp_err_t err = decode_import(password, sealed, &imported);
     if (err != ESP_OK) return err;
@@ -134,19 +187,39 @@ esp_err_t app_backup_validate(const char *password, const cJSON *sealed, cJSON *
         cJSON *name = cJSON_CreateString(s->wifi.entries[i].ssid);
         if (!name || !cJSON_AddItemToArray(networks, name)) { cJSON_Delete(name); err = ESP_ERR_NO_MEM; }
     }
-    free_import(imported);
+    if (err == ESP_OK) err = prepare_expiry_timer();
+    char import_id[sizeof(s_import_id)];
+    if (err == ESP_OK) {
+        unsigned char random[32];
+        static const char HEX[] = "0123456789abcdef";
+        esp_fill_random(random, sizeof(random));
+        for (size_t i = 0; i < sizeof(random); ++i) {
+            import_id[i * 2] = HEX[random[i] >> 4];
+            import_id[i * 2 + 1] = HEX[random[i] & 15];
+        }
+        import_id[64] = 0;
+        mbedtls_platform_zeroize(random, sizeof(random));
+        if (!cJSON_AddStringToObject(json, "import_id", import_id) ||
+            !cJSON_AddNumberToObject(json, "expires_in_seconds", APP_BACKUP_PREPARED_SECONDS)) err = ESP_ERR_NO_MEM;
+    }
+    if (err == ESP_OK) {
+        int64_t expires_at = esp_timer_get_time() + (int64_t) APP_BACKUP_PREPARED_SECONDS * 1000000;
+        portENTER_CRITICAL(&s_prepared_lock);
+        s_prepared = imported;
+        memcpy(s_import_id, import_id, sizeof(s_import_id));
+        s_expires_at = expires_at;
+        portEXIT_CRITICAL(&s_prepared_lock);
+    } else free_import(imported);
+    mbedtls_platform_zeroize(import_id, sizeof(import_id));
     if (err == ESP_OK) *summary = json; else cJSON_Delete(json);
     return err;
 }
 
-esp_err_t app_backup_import(const char *password, const cJSON *sealed)
+static esp_err_t apply_import(imported_t *imported)
 {
-    imported_t *imported;
-    esp_err_t err = decode_import(password, sealed, &imported);
-    if (err != ESP_OK) return err;
     /* Retain this device's rollback quarantine, never the source device's history. */
     app_ota_settings_t previous;
-    err = app_ota_storage_load(&previous, &imported->settings.ota_history);
+    esp_err_t err = app_ota_storage_load(&previous, &imported->settings.ota_history);
     imported->settings.ota_history.install_day = 0;
     if (err == ESP_OK) err = app_branding_pin_active();
     for (unsigned i = 0; i < 2 && err == ESP_OK; ++i) if (imported->assets[i]) {
@@ -157,4 +230,25 @@ esp_err_t app_backup_import(const char *password, const cJSON *sealed)
     if (err == ESP_OK) err = app_config_store_activate();
     free_import(imported);
     return err;
+}
+
+esp_err_t app_backup_import_prepared(const char *import_id)
+{
+    if (!import_id || strlen(import_id) != sizeof(s_import_id) - 1) return ESP_ERR_NOT_FOUND;
+    int64_t now = esp_timer_get_time();
+    imported_t *imported = NULL, *expired = NULL;
+    portENTER_CRITICAL(&s_prepared_lock);
+    if (s_prepared && now >= s_expires_at) expired = take_prepared_locked();
+    if (s_prepared && !memcmp(import_id, s_import_id, sizeof(s_import_id))) imported = take_prepared_locked();
+    portEXIT_CRITICAL(&s_prepared_lock);
+    free_import(expired);
+    return imported ? apply_import(imported) : ESP_ERR_NOT_FOUND;
+}
+
+esp_err_t app_backup_import(const char *password, const cJSON *sealed)
+{
+    app_backup_discard_prepared();
+    imported_t *imported;
+    esp_err_t err = decode_import(password, sealed, &imported);
+    return err == ESP_OK ? apply_import(imported) : err;
 }

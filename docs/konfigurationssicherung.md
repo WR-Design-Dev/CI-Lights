@@ -19,10 +19,20 @@ Browser-Cache der Jobliste sind flüchtige Zustände.
 **Konfiguration importieren** ist in demselben Verwaltungstab und im ersten
 Einrichtungsdialog vorhanden. Neue Ampel wie gewohnt über ihr Einrichtungs-WLAN
 verbinden, dann die Datei auswählen, das Sicherungspasswort eingeben und
-**Datei prüfen** wählen. Die Entschlüsselung kann etwas dauern. Die
+**Datei prüfen** wählen. Während der Entschlüsselung zeigt ein modaler Spinner
+eine geschätzte Dauer von ca. 60 Sekunden; die tatsächliche Dauer hängt von der
+Ampel ab. Die
 Zusammenfassung zeigt Gerätenamen, WLANs, Jenkins-Job und Verwaltungsbenutzer.
-Erst nach der Bestätigung **Aktuelle Einstellungen ersetzen …** und einem Klick
-auf **Konfiguration übernehmen und neu starten** wird etwas gespeichert.
+Die geprüfte Konfiguration bleibt zehn Minuten im RAM der Ampel. Nach der
+Bestätigung **Aktuelle Einstellungen ersetzen …** übernimmt **Konfiguration
+übernehmen und neu starten** dieses Ergebnis ohne erneute Entschlüsselung.
+Auch beim Speichern zeigt der Dialog einen Spinner. Eine neue Prüfung ersetzt
+das vorige Ergebnis; nach Ablauf oder Neustart muss erneut geprüft werden.
+
+Alternativ die Ersetzung bestätigen und **Direkt übernehmen und neu starten**
+wählen. Dieser Weg entschlüsselt und prüft die Datei einmal und speichert sie
+anschließend ohne Vorschau. Der Spinner zeigt auch hier ca. 60 Sekunden an.
+Bei beiden Wegen wird erst nach ausdrücklicher Bestätigung etwas gespeichert.
 Ein falsches Passwort oder eine ungültige Datei verändert die Konfiguration
 nicht. Bestehende WLAN-Profile und ein vorhandenes Branding werden vollständig
 durch die Sicherung ersetzt, auch wenn dort kein Banner/Favicon hinterlegt ist.

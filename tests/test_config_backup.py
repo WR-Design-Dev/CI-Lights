@@ -49,6 +49,9 @@ class ConfigBackupTests(unittest.TestCase):
                       'test_export': ([ctypes.c_char_p], ctypes.c_void_p),
                       'test_validate': ([ctypes.c_char_p, ctypes.c_char_p], ctypes.c_void_p),
                       'test_import': ([ctypes.c_char_p, ctypes.c_char_p], ctypes.c_int),
+                      'test_import_prepared': ([ctypes.c_char_p], ctypes.c_int),
+                      'test_derivations': ([], ctypes.c_uint),
+                      'test_advance_time': ([ctypes.c_int, ctypes.c_int], None),
                       'test_state': ([], ctypes.c_void_p), 'test_free': ([ctypes.c_void_p], None),
                       'test_writes': ([], ctypes.c_int), 'test_fail_after': ([ctypes.c_int], None),
                       'test_reset': ([], ctypes.c_int), 'test_config_present': ([], ctypes.c_int),
@@ -93,13 +96,66 @@ class ConfigBackupTests(unittest.TestCase):
         self.assertEqual(summary['networks'], ['source-wifi'])
         self.assertNotIn('token', json.dumps(summary))
         self.assertEqual(self.lib.test_writes(), before, 'Validation must never mutate NVS or branding')
-        self.assertEqual(self.lib.test_import(PASSWORD, encoded), 0)
+        derivations = self.lib.test_derivations()
+        self.assertEqual(len(summary['import_id']), 64)
+        self.assertEqual(summary['expires_in_seconds'], 600)
+        self.assertEqual(self.lib.test_import_prepared(summary['import_id'].encode()), 0)
+        self.assertEqual(self.lib.test_derivations(), derivations, 'Prepared import must not derive or decrypt again')
         self.assertEqual(self.state()['device']['title'], 'Target title', 'Activation waits for restart')
         self.lib.test_boot()
         target = self.state()
         self.assertEqual(target.pop('blocked'), '1.0.1006', 'Keep this device’s rollback quarantine')
         source.pop('blocked')
         self.assertEqual(target, source)
+
+    def test_prepared_import_requires_correct_id_and_consumes_it_once(self):
+        encoded = json.dumps(self.backup()).encode()
+        summary = self.read(self.lib.test_validate(PASSWORD, encoded))
+        before = self.lib.test_writes()
+        for invalid in (b'', b'0' * 64, b'x' * 100):
+            self.assertNotEqual(self.lib.test_import_prepared(invalid), 0)
+            self.assertEqual(self.lib.test_writes(), before)
+        import_id = summary['import_id'].encode()
+        self.assertEqual(self.lib.test_import_prepared(import_id), 0)
+        before = self.lib.test_writes()
+        self.assertNotEqual(self.lib.test_import_prepared(import_id), 0)
+        self.assertEqual(self.lib.test_writes(), before)
+
+    def test_prepared_import_expires_even_if_timer_callback_is_delayed(self):
+        encoded = json.dumps(self.backup()).encode()
+        for fire_timer in (0, 1):
+            summary = self.read(self.lib.test_validate(PASSWORD, encoded))
+            before = self.lib.test_writes()
+            self.lib.test_advance_time(600, fire_timer)
+            self.assertNotEqual(self.lib.test_import_prepared(summary['import_id'].encode()), 0)
+            self.assertEqual(self.lib.test_writes(), before)
+
+    def test_new_validation_invalidates_old_snapshot_including_failed_checks(self):
+        encoded = json.dumps(self.backup()).encode()
+        old = self.read(self.lib.test_validate(PASSWORD, encoded))['import_id'].encode()
+        new = self.read(self.lib.test_validate(PASSWORD, encoded))['import_id'].encode()
+        self.assertNotEqual(old, new)
+        before = self.lib.test_writes()
+        self.assertNotEqual(self.lib.test_import_prepared(old), 0)
+        self.assertFalse(self.lib.test_validate(b'wrong-password', encoded))
+        self.assertNotEqual(self.lib.test_import_prepared(new), 0)
+        self.assertEqual(self.lib.test_writes(), before)
+
+    def test_failed_prepared_import_consumes_snapshot_and_can_retry_directly(self):
+        encoded = json.dumps(self.backup()).encode()
+        self.lib.test_seed(0)
+        summary = self.read(self.lib.test_validate(PASSWORD, encoded))
+        self.lib.test_fail_after(1)
+        self.assertNotEqual(self.lib.test_import_prepared(summary['import_id'].encode()), 0)
+        self.lib.test_fail_after(0)
+        self.assertNotEqual(self.lib.test_import_prepared(summary['import_id'].encode()), 0)
+        self.lib.test_boot()
+        self.assertEqual(self.state()['device']['title'], 'Target title')
+        derivations = self.lib.test_derivations()
+        self.assertEqual(self.lib.test_import(PASSWORD, encoded), 0)
+        self.assertEqual(self.lib.test_derivations(), derivations + 1, 'Direct import decrypts exactly once')
+        self.lib.test_boot()
+        self.assertEqual(self.state()['device']['title'], 'Source title')
 
     def test_wrong_password_tampering_and_format_changes_never_write(self):
         backup = self.backup()

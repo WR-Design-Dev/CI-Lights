@@ -11,6 +11,7 @@
 #include "nvs.h"
 #include "esp_partition.h"
 #include "esp_app_desc.h"
+#include "esp_timer.h"
 #include "freertos/semphr.h"
 #include "mbedtls/md.h"
 #include "psa/crypto.h"
@@ -74,6 +75,15 @@ const esp_partition_t *esp_partition_find_first(int type,int subtype,const char 
 int esp_partition_read(const esp_partition_t *p,size_t at,void *out,size_t size){assert(p==&partition&&at+size<=p->size);memcpy(out,flash+at,size);return ESP_OK;}
 int esp_partition_write(const esp_partition_t *p,size_t at,const void *data,size_t size){assert(p==&partition&&at+size<=p->size&&at%16==0&&size%16==0);if(mutation())return ESP_FAIL;memcpy(flash+at,data,size);return ESP_OK;}
 int esp_partition_erase_range(const esp_partition_t *p,size_t at,size_t size){assert(p==&partition&&at+size<=p->size);if(mutation())return ESP_FAIL;memset(flash+at,255,size);return ESP_OK;}
+static int64_t now_us;
+static unsigned derivations;
+static esp_timer_create_args_t expiry_timer;
+int64_t esp_timer_get_time(void){return now_us;}
+int esp_timer_create(const esp_timer_create_args_t *args,esp_timer_handle_t *timer){expiry_timer=*args;*timer=&expiry_timer;return ESP_OK;}
+int esp_timer_start_periodic(esp_timer_handle_t timer,uint64_t period){assert(timer==&expiry_timer&&period==1000000);return ESP_OK;}
+int esp_timer_delete(esp_timer_handle_t timer){assert(timer==&expiry_timer);memset(&expiry_timer,0,sizeof(expiry_timer));return ESP_OK;}
+void test_advance_time(int seconds,int fire_timer){now_us+=(int64_t)seconds*1000000;if(fire_timer&&expiry_timer.callback)expiry_timer.callback(expiry_timer.arg);}
+unsigned test_derivations(void){return derivations;}
 void esp_fill_random(void *out,size_t size){assert(RAND_bytes(out,size)==1);}
 void mbedtls_platform_zeroize(void *p,size_t n){volatile unsigned char *b=p;while(n--)*b++=0;}
 const mbedtls_md_info_t *mbedtls_md_info_from_type(int type){static const int info=1;assert(type==1);return &info;}
@@ -94,7 +104,7 @@ int psa_crypto_init(void){return 0;}
 int psa_key_derivation_setup(psa_key_derivation_operation_t *o,int alg){assert(alg==101);memset(o,0,sizeof(*o));return 0;}
 int psa_key_derivation_input_integer(psa_key_derivation_operation_t *o,int step,uint64_t cost){assert(step==1&&cost==600000);o->cost=cost;return 0;}
 int psa_key_derivation_input_bytes(psa_key_derivation_operation_t *o,int step,const unsigned char *in,size_t n){if(step==2){assert(n==16);memcpy(o->salt,in,n);}else{assert(step==3&&n<=128);memcpy(o->password,in,n);o->password[n]=0;}return 0;}
-int psa_key_derivation_output_bytes(psa_key_derivation_operation_t *o,unsigned char *out,size_t n){assert(n==32);return PKCS5_PBKDF2_HMAC(o->password,strlen(o->password),o->salt,16,o->cost,EVP_sha256(),n,out)==1?0:-1;}
+int psa_key_derivation_output_bytes(psa_key_derivation_operation_t *o,unsigned char *out,size_t n){assert(n==32);++derivations;return PKCS5_PBKDF2_HMAC(o->password,strlen(o->password),o->salt,16,o->cost,EVP_sha256(),n,out)==1?0:-1;}
 int psa_key_derivation_abort(psa_key_derivation_operation_t *o){mbedtls_platform_zeroize(o,sizeof(*o));return 0;}
 int psa_import_key(const psa_key_attributes_t *a,const unsigned char *in,size_t n,mbedtls_svc_key_id_t *key){assert(a->type==4&&a->bits==256&&a->usage==3&&a->algorithm==5&&n==32);memcpy(key_bytes,in,n);*key=1;return 0;}
 int psa_destroy_key(mbedtls_svc_key_id_t key){(void)key;memset(key_bytes,0,32);return 0;}
@@ -119,6 +129,7 @@ bool traffic_light_manual_state(app_manual_light_t i){return runtime.enabled[i];
 void traffic_light_manual_color(app_manual_light_t i,uint8_t *r,uint8_t *g,uint8_t *b){*r=runtime.colors[i][0];*g=runtime.colors[i][1];*b=runtime.colors[i][2];}
 
 void test_seed(int variant){
+    app_backup_discard_prepared();now_us=0;derivations=0;
     fail_after=0;for(unsigned i=0;i<256;++i){free(entries[i].data);memset(&entries[i],0,sizeof(entries[i]));}memset(flash,255,sizeof(flash));app_storage_init();
     assert(app_admin_credentials_save(variant?"source-admin":"target-admin",variant?"source-password":"target-password")==0);
     app_config_t config={.wifi_auth=APP_WIFI_AUTH_PERSONAL,.jenkins_poll_interval_minutes=7,.jenkins_job_list_timeout_seconds=120,.jenkins_status_timeout_seconds=90,.light_brightness_percent=83,.build_effect=APP_BUILD_EFFECT_BLINK,.cpu_mode=APP_CPU_MODE_AUTO_240};
@@ -131,10 +142,11 @@ void test_seed(int variant){
     const char *banner=variant?"<svg>source</svg>":"<svg>target</svg>";assert(!app_branding_save(APP_BRANDING_LOGO,APP_BRANDING_SVG,banner,strlen(banner)));
     unsigned char icon[]={0,0,1,0,1,0,7,8};assert(!app_branding_save(APP_BRANDING_FAVICON,APP_BRANDING_ICO,icon,sizeof(icon)));writes=0;
 }
-void test_boot(void){app_storage_init();assert(!app_light_settings_load(&runtime));}
+void test_boot(void){app_backup_discard_prepared();app_storage_init();assert(!app_light_settings_load(&runtime));}
 void test_free(void *p){free(p);}
 char *test_export(const char *password){cJSON *out=NULL;assert(!app_backup_export(password,&out));char *text=cJSON_PrintUnformatted(out);cJSON_Delete(out);return text;}
 int test_import(const char *password,const char *file){cJSON *json=app_backup_json_parse(file);if(!json)return ESP_ERR_INVALID_ARG;int err=app_backup_import(password,json);cJSON_Delete(json);return err;}
+int test_import_prepared(const char *import_id){return app_backup_import_prepared(import_id);}
 char *test_validate(const char *password,const char *file){cJSON *json=app_backup_json_parse(file),*summary=NULL;int err=app_backup_validate(password,json,&summary);cJSON_Delete(json);if(err)return NULL;char *text=cJSON_PrintUnformatted(summary);cJSON_Delete(summary);return text;}
 char *test_state(void){app_settings_snapshot_t s;assert(!app_settings_snapshot_load(&s));cJSON *json=app_backup_snapshot_json(&s);assert(json);cJSON_AddStringToObject(json,"blocked",s.ota_history.blocked_version);char banner[128]={0};app_branding_info_t info;if(app_branding_get_info(0,&info)&&info.length<sizeof(banner))assert(!app_branding_read(0,banner,info.length));cJSON_AddStringToObject(json,"banner",banner);char *text=cJSON_PrintUnformatted(json);app_backup_json_delete(json);return text;}
 int test_reset(void){return app_config_factory_reset();}

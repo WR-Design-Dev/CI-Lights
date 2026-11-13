@@ -1,7 +1,8 @@
 #pragma once
 
 #define CONFIG_TRANSFER_STYLE \
-    ".config-transfer{margin-top:1.3rem;padding-top:1rem;border-top:1px solid #dbe7ef}.config-transfer h2{font-size:1.1rem}.config-transfer .hint{font-size:.88rem;color:#5c7080}.config-transfer [data-error=true]{color:#a11227}.config-transfer [hidden]{display:none!important}.config-summary{padding:1rem;background:#f1f7fc;border:1px solid #dbe7ef;border-radius:.7rem;white-space:pre-wrap;overflow-wrap:anywhere}.config-confirm{display:flex;align-items:flex-start;gap:.6rem;font-weight:500}.config-confirm input{width:auto;flex:0 0 auto;margin:.25rem 0 0}.config-transfer button{display:block;margin-top:1rem}.config-transfer [role=status]{white-space:pre-wrap}"
+    ".config-transfer{margin-top:1.3rem;padding-top:1rem;border-top:1px solid #dbe7ef}.config-transfer h2{font-size:1.1rem}.config-transfer .hint{font-size:.88rem;color:#5c7080}.config-transfer [data-error=true]{color:#a11227}.config-transfer [hidden]{display:none!important}.config-summary{padding:1rem;background:#f1f7fc;border:1px solid #dbe7ef;border-radius:.7rem;white-space:pre-wrap;overflow-wrap:anywhere}.config-confirm{display:flex;align-items:flex-start;gap:.6rem;font-weight:500}.config-confirm input{width:auto;flex:0 0 auto;margin:.25rem 0 0}.config-transfer button{display:block;margin-top:1rem}.config-transfer [role=status]{white-space:pre-wrap}" \
+    "#config-busy{max-width:min(28rem,calc(100vw - 3rem));border:0;border-radius:1rem;padding:1.5rem;color:#16354d;background:#fff;box-shadow:0 1rem 3rem #102a674d}#config-busy::backdrop{background:#102a6780}.config-busy-card{display:flex;align-items:center;gap:1rem}.config-busy-card p{margin:.4rem 0 0}.config-spinner{display:block;width:2rem;height:2rem;flex:0 0 auto;border:.25rem solid #c8d9e8;border-top-color:#2563eb;border-radius:2rem;animation:config-spin .8s linear infinite}@keyframes config-spin{to{transform:rotate(360deg)}}"
 
 #define CONFIG_IMPORT_HTML \
     "<section id=\"config-transfer\" class=\"config-transfer\" aria-labelledby=\"config-import-title\"><h2 id=\"config-import-title\">Konfiguration importieren</h2>" \
@@ -9,11 +10,13 @@
     "<form id=\"config-import-form\"><label>Konfigurationsdatei<input id=\"config-import-file\" type=\"file\" accept=\".json,application/json\" required></label>" \
     "<label>Sicherungspasswort<input id=\"config-import-password\" type=\"password\" autocomplete=\"off\" required minlength=\"12\" maxlength=\"128\"></label>" \
     "<button id=\"config-validate\" type=\"submit\">Datei prüfen</button></form>" \
-    "<div id=\"config-import-review\" hidden><p id=\"config-import-summary\" class=\"config-summary\"></p>" \
+    "<div id=\"config-import-review\" hidden><p id=\"config-import-summary\" class=\"config-summary\"></p></div>" \
     "<label class=\"config-confirm\"><input id=\"config-import-confirm\" type=\"checkbox\"><span>Aktuelle Einstellungen ersetzen und den Verwaltungszugang aus der Sicherung übernehmen.</span></label>" \
     "<p class=\"hint\">Nach dem Import gilt das Verwaltungspasswort der Quell-Ampel. Bei gleichen Gerätenamen verwendet die neue Ampel gegebenenfalls ihre MAC-Adresse als Namen.</p>" \
-    "<button id=\"config-import-apply\" type=\"button\" disabled>Konfiguration übernehmen und neu starten</button></div>" \
-    "<p id=\"config-import-message\" class=\"hint\" role=\"status\" aria-live=\"polite\"></p></section>"
+    "<button id=\"config-import-direct\" type=\"button\" disabled>Direkt übernehmen und neu starten</button>" \
+    "<button id=\"config-import-apply\" type=\"button\" hidden disabled>Konfiguration übernehmen und neu starten</button>" \
+    "<p id=\"config-import-message\" class=\"hint\" role=\"status\" aria-live=\"polite\"></p></section>" \
+    "<dialog id=\"config-busy\" aria-labelledby=\"config-busy-title\" aria-describedby=\"config-busy-detail\" aria-busy=\"true\"><div class=\"config-busy-card\"><span class=\"config-spinner\" aria-hidden=\"true\"></span><div><strong id=\"config-busy-title\"></strong><p id=\"config-busy-detail\" role=\"status\" aria-live=\"polite\"></p></div></div></dialog>"
 
 #define CONFIG_EXPORT_HTML \
     "<section class=\"config-transfer\" aria-labelledby=\"config-export-title\"><h2 id=\"config-export-title\">Konfiguration exportieren</h2>" \

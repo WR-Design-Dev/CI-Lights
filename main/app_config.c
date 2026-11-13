@@ -725,8 +725,11 @@ static esp_err_t config_transfer_handler(httpd_req_t *request)
     const cJSON *password = cJSON_GetObjectItemCaseSensitive(json, "password");
     const cJSON *confirmation = cJSON_GetObjectItemCaseSensitive(json, "password_confirm");
     const cJSON *backup = cJSON_GetObjectItemCaseSensitive(json, "backup");
-    bool valid = cJSON_IsObject(json) && cJSON_IsString(password) && app_backup_password_valid(password->valuestring) &&
-        (exporting ? cJSON_IsString(confirmation) && !strcmp(password->valuestring, confirmation->valuestring) : cJSON_IsObject(backup)) &&
+    const cJSON *import_id = cJSON_GetObjectItemCaseSensitive(json, "import_id");
+    bool prepared = importing && cJSON_IsString(import_id);
+    bool valid = cJSON_IsObject(json) && (prepared ? strlen(import_id->valuestring) == 64 && !password && !backup :
+        cJSON_IsString(password) && app_backup_password_valid(password->valuestring) &&
+        (exporting ? cJSON_IsString(confirmation) && !strcmp(password->valuestring, confirmation->valuestring) : cJSON_IsObject(backup))) &&
         (!importing || cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json, "confirmed")));
     if (!valid) {
         app_backup_json_delete(json);
@@ -742,7 +745,7 @@ static esp_err_t config_transfer_handler(httpd_req_t *request)
     if (importing && xTaskCreate(restart_after_import, "config_restart", 4096, NULL, 3, &restart) != pdPASS) err = ESP_ERR_NO_MEM;
     if (err == ESP_OK) {
         if (exporting) err = app_backup_export(password->valuestring, &result);
-        else if (importing) err = app_backup_import(password->valuestring, backup);
+        else if (importing) err = prepared ? app_backup_import_prepared(import_id->valuestring) : app_backup_import(password->valuestring, backup);
         else err = app_backup_validate(password->valuestring, backup, &result);
     }
     app_backup_json_delete(json);
@@ -750,6 +753,8 @@ static esp_err_t config_transfer_handler(httpd_req_t *request)
     if (err != ESP_OK) {
         if (restart) vTaskDelete(restart);
         cJSON_Delete(result);
+        if (prepared && err == ESP_ERR_NOT_FOUND) return send_provision_error(request, "409 Conflict",
+            "Die geprüfte Konfiguration ist abgelaufen oder nicht mehr verfügbar. Datei erneut prüfen oder direkt übernehmen.");
         bool invalid = err == ESP_ERR_INVALID_ARG || err == ESP_ERR_INVALID_SIZE || err == ESP_ERR_INVALID_CRC;
         return send_provision_error(request, invalid ? "400 Bad Request" : "500 Internal Server Error",
             err == ESP_ERR_INVALID_CRC ? "Sicherungspasswort falsch oder Datei beschädigt." : invalid ?

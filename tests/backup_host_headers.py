@@ -21,6 +21,17 @@ typedef int esp_err_t;
 'esp_http_server.h': '#pragma once\ntypedef struct httpd_req httpd_req_t;\n',
 'esp_log.h': '#pragma once\n#define ESP_LOGW(tag,...) ((void)(tag))\n#define ESP_LOGE(tag,...) ((void)(tag))\n',
 'esp_random.h': '#pragma once\n#include <stddef.h>\nvoid esp_fill_random(void*,size_t);\n',
+'esp_timer.h': r'''
+#pragma once
+#include <stdint.h>
+#include "esp_err.h"
+typedef struct {void (*callback)(void*); void *arg; const char *name;} esp_timer_create_args_t;
+typedef void *esp_timer_handle_t;
+int64_t esp_timer_get_time(void);
+esp_err_t esp_timer_create(const esp_timer_create_args_t*,esp_timer_handle_t*);
+esp_err_t esp_timer_start_periodic(esp_timer_handle_t,uint64_t);
+esp_err_t esp_timer_delete(esp_timer_handle_t);
+''',
 'esp_app_desc.h': '#pragma once\ntypedef struct {char version[32];} esp_app_desc_t;\nconst esp_app_desc_t *esp_app_get_description(void);\n',
 'nvs.h': r'''
 #pragma once
@@ -57,7 +68,7 @@ esp_err_t esp_partition_read(const esp_partition_t*,size_t,void*,size_t);
 esp_err_t esp_partition_write(const esp_partition_t*,size_t,const void*,size_t);
 esp_err_t esp_partition_erase_range(const esp_partition_t*,size_t,size_t);
 ''',
-'freertos/FreeRTOS.h': '#pragma once\n#define pdPASS 1\n#define portMAX_DELAY -1\n#define tskIDLE_PRIORITY 0\n',
+'freertos/FreeRTOS.h': '#pragma once\n#define pdPASS 1\n#define portMAX_DELAY -1\n#define tskIDLE_PRIORITY 0\ntypedef int portMUX_TYPE;\n#define portMUX_INITIALIZER_UNLOCKED 0\n#define portENTER_CRITICAL(m) ((void)(m))\n#define portEXIT_CRITICAL(m) ((void)(m))\n',
 'freertos/task.h': '#pragma once\nint xTaskCreate(void(*)(void*),const char*,int,void*,int,void*);\nvoid vTaskDelete(void*);\n',
 'freertos/semphr.h': '#pragma once\ntypedef void *SemaphoreHandle_t;\nSemaphoreHandle_t xSemaphoreCreateBinary(void);\nvoid xSemaphoreGive(SemaphoreHandle_t);\nvoid xSemaphoreTake(SemaphoreHandle_t,int);\nvoid vSemaphoreDelete(SemaphoreHandle_t);\n',
 'mbedtls/platform_util.h': '#pragma once\n#include <stddef.h>\nvoid mbedtls_platform_zeroize(void*,size_t);\n',
